@@ -42,6 +42,7 @@ body{height:100%;margin:0;background:var(--bg);color:var(--fg);
 #timebar{position:absolute;top:0;left:0;right:0;height:4px;background:rgba(127,127,160,.2);z-index:6}
 #timefill{height:100%;width:0%;background:var(--accent);transition:width 1s linear}
 #gate{position:absolute;top:0;right:0;width:88px;height:88px;z-index:8;touch-action:none}
+#gate::after{content:'';position:absolute;top:16px;right:16px;width:9px;height:9px;border-radius:50%;background:var(--muted);opacity:.35}
 
 /* ---- play ---- */
 #screen-play{padding:16px 14px 12px}
@@ -107,6 +108,20 @@ body{height:100%;margin:0;background:var(--bg);color:var(--fg);
 #done-emoji{font-size:min(40vh,50vw);line-height:1;animation:wobble 1.6s ease-in-out infinite}
 #screen-done h1{font-size:min(6vh,9vw);margin:0}
 
+/* ---- jump sheet ---- */
+#screen-switch{overflow:auto;-webkit-overflow-scrolling:touch;background:var(--bg);z-index:7}
+.sheet{max-width:600px;width:100%;margin:0 auto;padding:24px 18px 44px;display:flex;flex-direction:column;gap:18px}
+.jump-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.jump{font:inherit;border:0;border-radius:16px;padding:16px 14px;background:var(--chip);color:var(--fg);text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:4px;min-height:64px}
+.jump b{font-size:17px}
+.jump span{font-size:12px;color:var(--muted)}
+.jump.cur{background:var(--ok);color:#fff}
+.jump.cur span{color:rgba(255,255,255,.85)}
+.jump.off{opacity:.6}
+.jump.special{background:var(--card);border:2px solid var(--edge)}
+.jump:focus-visible{outline:3px solid var(--ring);outline-offset:2px}
+.select{font:inherit;padding:10px 12px;border-radius:12px;border:2px solid var(--edge);background:var(--card);color:var(--fg);max-width:100%}
+
 /* ---- grown-up panel ---- */
 #screen-parent{overflow:auto;-webkit-overflow-scrolling:touch;background:var(--bg);padding:24px 18px 48px;z-index:7}
 .panel{max-width:600px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
@@ -162,6 +177,7 @@ dl.stats dd{margin:0;font-weight:700}
   <div id="gate" class="hidden" aria-hidden="true"></div>
 
   <section id="screen-parent" class="screen"><div class="panel" id="panel"></div></section>
+  <section id="screen-switch" class="screen hidden"><div class="sheet" id="switch"></div></section>
 
   <section id="screen-play" class="screen hidden">
     <div id="cue"></div>
@@ -222,7 +238,9 @@ const CFG = {
   EXPLORE_TAPS: 12, EXPLORE_RATIO: 0.7, // leave Explore once 70% of 12+ taps land on things
   REVIEW_P: 0.15,         // share of trials run one step easier (confidence, not scored)
   MISS_STREAK: 3, SUPPORT_TRIALS: 2,  // 3 misses in a row → 2 can't-miss trials
-  SPAM_TAPS: 6, SPAM_WINDOW_MS: 2000  // mashing → explore burst
+  SPAM_TAPS: 6, SPAM_WINDOW_MS: 2000, // mashing → explore burst
+  GATE_HOLD_MS: 700,      // hold the top-right corner this long → jump sheet
+  CALM_JUMP_MS: 120000    // "Calm bubbles" from the jump sheet runs this long, then back to play
 };
 const CHEERS = ['Yes!', 'You found it!', 'Hooray!', 'Wow!', "That's it!"];
 const WIGGLES = [['👃', 'Touch your nose!'], ['👏', 'Clap, clap, clap!'], ['🙌', 'Arms up high!'], ['👋', 'Wiggle your fingers!'],
@@ -306,7 +324,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
-const settings = Object.assign({ minutes: 10, sound: true, domains: ['animals', 'vehicles', 'food'] }, store.get('tt.settings', {}));
+const settings = Object.assign({ minutes: 10, sound: true, domains: ['animals', 'vehicles', 'food'], voiceURI: '', rate: 0.85 }, store.get('tt.settings', {}));
 settings.domains = (settings.domains || []).filter(d => RAW[d]);
 if (!settings.v || settings.v < 2) { if (!settings.domains.includes('counting')) settings.domains.push('counting'); settings.v = 2; }
 let progress = store.get('tt.progress', null);
@@ -452,17 +470,49 @@ const SFX = {
 };
 const TTS = {
   ok: typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window,
-  voice: null,
-  pick() { try { const vs = speechSynthesis.getVoices();
-    this.voice = vs.find(v => /en[-_]US/i.test(v.lang) && /Samantha|Google US|Aria|Jenny|Zira/i.test(v.name)) || vs.find(v => /^en/i.test(v.lang)) || null; } catch (e) {} },
-  say(text) {
-    if (!settings.sound || !this.ok) return;
-    try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text);
-      if (this.voice) u.voice = this.voice; u.lang = 'en-US'; u.rate = 0.9; u.pitch = 1.15; speechSynthesis.speak(u); } catch (e) {}
+  voice: null, seq: 0, cur: 0, busy: false, pending: null, guard: null,
+  // English voices, best first: premium > enhanced > natural, offline-capable before online, en-US/en-CA before other English.
+  list() {
+    let vs = []; try { vs = speechSynthesis.getVoices() || []; } catch (e) {}
+    const score = v => {
+      const u = (v.voiceURI || '') + ' ' + (v.name || ''); let x = 0;
+      if (/premium/i.test(u)) x += 30; else if (/enhanced/i.test(u)) x += 20;
+      if (/natural|neural/i.test(u)) x += 15;
+      if (v.localService) x += 10;
+      if (/^en[-_](US|CA)/i.test(v.lang)) x += 5; else if (/^en/i.test(v.lang)) x += 2;
+      if (/Samantha|Ava|Zoe|Allison|Susan|Nicky|Karen|Moira|Google US|Aria|Jenny/i.test(v.name)) x += 3;
+      return x;
+    };
+    return vs.filter(v => /^en/i.test(v.lang)).map(v => ({ v, x: score(v) })).sort((a, b) => b.x - a.x).map(o => o.v);
   },
-  stop() { try { if (this.ok) speechSynthesis.cancel(); } catch (e) {} }
+  label(v) {
+    const u = v.voiceURI || ''; const q = /premium/i.test(u) ? ' (premium)' : /enhanced/i.test(u) ? ' (enhanced)' : '';
+    return `${v.name}${q}, ${v.lang}${v.localService ? '' : ', needs internet'}`;
+  },
+  pick() { const vs = this.list(); this.voice = (settings.voiceURI && vs.find(v => v.voiceURI === settings.voiceURI)) || vs[0] || null; },
+  // mode 'replace' (default): stop whatever is playing and say this. mode 'latest': never clip a word — if busy, remember
+  // only the newest text and say it when the current one ends (fast counting taps say "one … four … six", each whole).
+  say(text, mode, force) {
+    if ((!settings.sound && !force) || !this.ok) return;
+    try {
+      if (mode === 'latest' && this.busy) { this.pending = text; return; }
+      speechSynthesis.cancel(); this.pending = null;
+      const u = new SpeechSynthesisUtterance(text);
+      if (this.voice) { u.voice = this.voice; u.lang = this.voice.lang; } else u.lang = 'en-US';
+      u.rate = settings.rate || 0.85; u.pitch = 1;
+      const id = ++this.seq; this.cur = id; this.busy = true;
+      const done = () => { if (this.cur !== id) return; this.busy = false; const p = this.pending; this.pending = null; if (p) this.say(p, 'latest'); };
+      u.onend = done; u.onerror = done;
+      clearTimeout(this.guard); this.guard = setTimeout(() => { if (this.cur === id && this.busy) done(); }, 500 + text.length * 120);
+      speechSynthesis.speak(u);
+    } catch (e) {}
+  },
+  stop() { try { if (this.ok) speechSynthesis.cancel(); } catch (e) {} this.busy = false; this.pending = null; }
 };
-if (TTS.ok) { TTS.pick(); try { speechSynthesis.onvoiceschanged = () => TTS.pick(); } catch (e) {} }
+if (TTS.ok) {
+  TTS.pick();
+  try { speechSynthesis.onvoiceschanged = () => { TTS.pick(); if (!$('#screen-parent').classList.contains('hidden')) renderPanel(); }; } catch (e) {}
+}
 
 /* ================= RUNTIME ================= */
 function startSession() {
@@ -512,14 +562,15 @@ function startBreak() {
   };
   S.breakStep();
 }
-function startCalm() {
+function startCalm(opts) {
   T.clearAll(); clearIdle(); hideCelebrate();
   S.phase = 'calm'; S.trial = null; S.explore = null; show('calm'); setBg('calm');
   $('#bubbles').innerHTML = '';
   TTS.say('Nice and slow. Pop the bubbles.');
   const spawn = () => { if (S.phase !== 'calm' || S.paused) return; makeBubble(); T.after(800 + Math.random() * 700, spawn); };
   spawn();
-  T.after(Math.max(800, S.endAt - now()), finishSession);
+  const left = S.endAt - now(), ms = opts && opts.ms ? Math.min(opts.ms, left) : left;
+  T.after(Math.max(800, ms), (opts && opts.ms && ms < left - 500) ? nextBlock : finishSession);
 }
 function finishSession() {
   T.clearAll(); clearIdle(); hideCelebrate();
@@ -532,25 +583,54 @@ function endSession() {
   T.clearAll(); clearIdle(); hideCelebrate(); TTS.stop(); stopTimebar();
   $('#bubbles').innerHTML = ''; setBg(null); save();
 }
-function openPanel() {
-  if (S.running && !S.paused) { S.paused = true; S.pauseAt = now(); T.clearAll(); clearIdle(); hideCelebrate(); TTS.stop(); }
-  renderPanel(); show('parent'); setBg(null);
+function pause() {
+  if (!S.running || S.paused) return;
+  S.paused = true; S.pauseAt = now(); T.clearAll(); clearIdle(); hideCelebrate(); TTS.stop();
 }
-function resumeSession() {
-  if (!S.running) return;
+function unpause() {
+  if (!S.paused) return;
   const dt = now() - S.pauseAt; S.pausedTotal += dt;
   S.endAt = S.start + settings.minutes * 60000 + S.pausedTotal;
   S.blockEndsAt = Math.min(S.blockEndsAt + dt, S.endAt - CFG.CALM_MS);
   S.paused = false;
+}
+function openPanel() { pause(); renderPanel(); show('parent'); setBg(null); }
+function openSwitch() {
+  if (!S.running) return openPanel();
+  pause(); renderSwitch(); show('switch'); setBg(null);
+}
+function resumeSession() {
+  if (!S.running) return;
+  unpause();
   if (!S.order.length) S.order = shuffle(settings.domains);
   if (S.phase === 'break' || S.phase === 'calm' || !settings.domains.includes(S.dom)) return nextBlock();
   setBg(S.dom); runTrial();
 }
+// Parent jumps: straight into a category, a wiggle break, or calm bubbles — from the jump sheet, a two-finger swipe, or N/P keys.
+function jumpTo(d) {
+  if (!S.running || !DOMAINS[d]) return;
+  unpause();
+  if (!settings.domains.includes(d)) { settings.domains.push(d); save(); }
+  if (!S.order.includes(d)) S.order.push(d);
+  T.clearAll(); clearIdle(); hideCelebrate();
+  S.dom = d; S.block++; S.justBroke = true;
+  S.blockEndsAt = Math.min(now() + CFG.BLOCK_MS, S.endAt - CFG.CALM_MS);
+  if (S.blockEndsAt - now() < 5000) return startCalm();
+  setBg(d); runTrial();
+}
+function stepCategory(dir) {
+  if (!S.running || S.paused) return;
+  const list = settings.domains.length ? settings.domains : ['animals'];
+  const i = list.indexOf(S.dom);
+  jumpTo(list[((i < 0 ? 0 : i + dir) + list.length) % list.length]);
+}
+function jumpWiggle() { if (!S.running) return; unpause(); S.justBroke = true; startBreak(); }
+function jumpCalm() { if (!S.running) return; unpause(); startCalm({ ms: CFG.CALM_JUMP_MS }); }
 
 /* ================= UI ================= */
 function show(id) {
   $$('.screen').forEach(s => s.classList.toggle('hidden', s.id !== 'screen-' + id));
-  $('#gate').classList.toggle('hidden', id === 'parent' || !S.running);
+  $('#gate').classList.toggle('hidden', id === 'parent' || id === 'switch' || !S.running);
 }
 function isDark() {
   const t = document.documentElement.dataset.theme;
@@ -614,13 +694,13 @@ function onPadTap() {
   const big = $('#choices .count-big'), row = $('#choices .count-row');
   if (big) big.innerHTML = `<span class="n">${n}</span>`;
   if (row) { const sp = document.createElement('span'); sp.textContent = tr.obj[1]; row.appendChild(sp); }
-  SFX.count(n); TTS.say(NUMWORDS[n] || String(n));
+  SFX.count(n); TTS.say(NUMWORDS[n] || String(n), 'latest');
   if (n >= tr.target.val) {
     tr.done = true; clearIdle();
     finishTrial(!tr.nudged, now() - tr.startedAt);
     const word = tr.target.name, things = tr.target.val === 1 ? tr.obj[0] : tr.obj[2];
     celebrateHTML(`<span class="item num"><span class="numeral">${tr.target.val}</span></span><div class="celebrate-row">${tr.obj[1].repeat(tr.target.val)}</div>`,
-      word, `${rand(CHEERS)} ${cap1(word)}! ${cap1(word)} ${things}!`, runTrial);
+      word, `${rand(CHEERS)} ${cap1(word)}. ${cap1(word)} ${things}.`, runTrial);
   } else armIdle();
 }
 function onChoice(i, card) {
@@ -653,7 +733,7 @@ function showHint(tr) {
   $('#cue').innerHTML = cueHTML(tr, 'show');
   SFX.play('hint'); TTS.say(`Here! ${cap1(tr.target.name)}!`);
 }
-function celebrate(it, then) { celebrateHTML(renderItem(it), it.name, `${rand(CHEERS)} ${cap1(it.name)}! ${it.say}`, then); }
+function celebrate(it, then) { celebrateHTML(renderItem(it), it.name, `${rand(CHEERS)} ${cap1(it.name)}. ${it.say}`, then); }
 function celebrateHTML(html, label, speech, then) {
   const el = $('#celebrate');
   el.innerHTML = `<div class="big">${html}</div><div class="label">${label}</div>`;
@@ -722,7 +802,7 @@ function onExploreTap(card) {
   const ex = S.explore; if (!ex) return;
   const it = ex.choices[+card.dataset.i]; if (!it) return;
   card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
-  SFX.play('tap'); TTS.say(`${cap1(it.name)}. ${it.say}`);
+  SFX.play('tap'); TTS.say(`${cap1(it.name)}. ${it.say}`, 'latest');
   S.stats.exploreTaps++; ex.taps++; recordExploreTap(S.dom, true); save();
   if (ex.taps % 8 === 0) dealExplore();
   if (!ex.poke && dprog(S.dom).level > 0) {   // graduated out of Explore mid-block
@@ -752,6 +832,18 @@ function timebarStart() {
   }, 1000);
 }
 function stopTimebar() { if (tbI) { clearInterval(tbI); tbI = null; } }
+
+/* ---- jump sheet ---- */
+function renderSwitch() {
+  const order = [...settings.domains, ...Object.keys(DOMAINS).filter(d => !settings.domains.includes(d))];
+  const inPlay = S.phase !== 'break' && S.phase !== 'calm';
+  $('#switch').innerHTML = `<div><h2 style="font-size:24px;margin:0">Jump to</h2><p class="note" style="margin:4px 0 0">Paused. Pick anything, or resume where you were.</p></div>
+    <div class="jump-grid">${order.map(d => `<button class="jump${d === S.dom && inPlay ? ' cur' : ''}${settings.domains.includes(d) ? '' : ' off'}" data-act="jump" data-v="${d}"><b>${DOMAINS[d].name}</b><span>${ladder(d)[dprog(d).level].name}${settings.domains.includes(d) ? '' : ', not in rotation'}</span></button>`).join('')}
+      <button class="jump special" data-act="wiggle"><b>Wiggle break</b><span>two moves, about 20 seconds</span></button>
+      <button class="jump special" data-act="calm"><b>Calm bubbles</b><span>two minutes, then back to play</span></button></div>
+    <div class="row"><button class="btn primary" data-act="resume">Resume</button><button class="btn" data-act="settings">Settings</button><button class="btn" data-act="end">All done now</button></div>
+    <p class="note">While playing, a two-finger swipe left or right jumps to the next or previous category (N and P on a keyboard). Hold the top-right corner for a moment to open this sheet.</p>`;
+}
 
 /* ---- grown-up panel ---- */
 function ladderHTML(d) {
@@ -785,12 +877,18 @@ function renderPanel() {
     <p class="note">Ends with a minute of slow bubbles, then a clear all-done.</p></div>`;
   h += `<div><h2>Sound</h2><div class="seg"><button data-act="sound" data-v="1" class="${settings.sound ? 'on' : ''}">On</button><button data-act="sound" data-v="0" class="${!settings.sound ? 'on' : ''}">Off, silent mode</button></div>
     <p class="note">Silent mode swaps spoken prompts for a quick peek at the target, so it works muted at the table.</p></div>`;
+  const voices = TTS.ok ? TTS.list() : [];
+  h += `<div><h2>Voice</h2>` + (voices.length
+    ? `<select class="select" data-act="voice">${voices.map(v => `<option value="${v.voiceURI}"${TTS.voice && TTS.voice.voiceURI === v.voiceURI ? ' selected' : ''}>${TTS.label(v)}</option>`).join('')}</select>`
+    : `<p class="note" style="margin:0">No speech voices found on this device yet.</p>`)
+    + `<div class="row" style="margin-top:10px"><div class="seg"><button data-act="rate" data-v="0.72" class="${settings.rate <= 0.75 ? 'on' : ''}">Slow and clear</button><button data-act="rate" data-v="0.85" class="${settings.rate > 0.75 ? 'on' : ''}">Normal</button></div><button class="btn" data-act="testvoice">Hear it</button></div>
+    <p class="note">The voice that ships with an iPad is the compact one, which is why it sounds flat. Better ones are a free download: Settings, Accessibility, Spoken Content, Voices, English, then open Samantha or Ava and download the Enhanced or Premium version. It then shows up in this list with that label, and works offline.</p></div>`;
   h += `<div><h2>Categories</h2><div class="row">${Object.keys(DOMAINS).map(d =>
     `<button class="chip ${settings.domains.includes(d) ? 'on' : ''}" data-act="dom" data-v="${d}">${DOMAINS[d].name}<span class="lvl">${ladder(d)[dprog(d).level].name}</span></button>`).join('')}</div></div>`;
   const shown = Object.keys(DOMAINS).filter(d => settings.domains.includes(d) || dprog(d).hist.length || dprog(d).level > 0);
   h += `<div><h2>Paths</h2><p class="note" style="margin:0 0 6px">Scores move each category along its own ladder. Tap a step to override. Greyed steps unlock once a concrete category gets further.</p>${shown.map(ladderHTML).join('')}</div>`;
   h += `<div class="row"><button class="btn danger" data-act="reset">${S.confirmReset ? 'Tap again to erase all progress' : 'Reset progress'}</button></div>`;
-  h += `<div class="tips">Open this panel by holding the top-right corner for 1.5 seconds, or pressing <code>Esc</code>. On a keyboard, <code>←</code> <code>↑</code> <code>↓</code> <code>→</code> or <code>1</code> to <code>4</code> pick a card and <code>Space</code> repeats the prompt. On iPad, turn on Guided Access (Settings, Accessibility) and triple-click to lock the kid in.</div>`;
+  h += `<div class="tips">During play, hold the top-right corner for a moment (or press <code>Esc</code>) for the jump sheet: switch category, wiggle break, calm bubbles, end early, or come back here. A two-finger swipe left or right jumps categories without the sheet. On a keyboard, <code>←</code> <code>↑</code> <code>↓</code> <code>→</code> or <code>1</code> to <code>4</code> pick a card, <code>Space</code> repeats the prompt, <code>N</code> and <code>P</code> jump categories. On iPad, turn on Guided Access (Settings, Accessibility) and triple-click to lock the kid in.</div>`;
   $('#panel').innerHTML = h;
 }
 
@@ -803,6 +901,8 @@ $('#panel').addEventListener('click', e => {
   if (act === 'end') { endSession(); return renderPanel(); }
   if (act === 'min') settings.minutes = +v;
   if (act === 'sound') settings.sound = v === '1';
+  if (act === 'rate') settings.rate = +v;
+  if (act === 'testvoice') { SFX.init(); SFX.resume(); TTS.say("Where's the cow? Cow. Moo! Let's count to three. One, two, three.", 'replace', true); return; }
   if (act === 'dom') { const i = settings.domains.indexOf(v); if (i >= 0) settings.domains.splice(i, 1); else settings.domains.push(v); if (S.running) S.order = shuffle(settings.domains); }
   if (act === 'lvl') { const d = b.dataset.d, p = dprog(d), lv = Math.min(+v, levelCap(d)); p.level = lv; p.hist = p.hist.filter(h => h.level !== lv); if (lv > 0) p.explore = { on: 0, all: 0 }; }
   if (act === 'reset') {
@@ -810,6 +910,21 @@ $('#panel').addEventListener('click', e => {
     else { S.confirmReset = true; setTimeout(() => { S.confirmReset = false; if (!$('#screen-parent').classList.contains('hidden')) renderPanel(); }, 3000); }
   }
   save(); renderPanel();
+});
+$('#panel').addEventListener('change', e => {
+  const sel = e.target.closest('select[data-act="voice"]'); if (!sel) return;
+  settings.voiceURI = sel.value; TTS.pick(); save();
+  SFX.init(); SFX.resume(); TTS.say("Hi! Let's play.", 'replace', true);
+});
+$('#switch').addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const act = b.dataset.act;
+  if (act === 'jump') jumpTo(b.dataset.v);
+  else if (act === 'wiggle') jumpWiggle();
+  else if (act === 'calm') jumpCalm();
+  else if (act === 'resume') resumeSession();
+  else if (act === 'settings') openPanel();
+  else if (act === 'end') finishSession();
 });
 $('#screen-play').addEventListener('pointerdown', e => {
   if (e.isPrimary === false) return;
@@ -824,15 +939,17 @@ $('#screen-break').addEventListener('pointerdown', () => { if (S.phase === 'brea
 $('#done-parent').addEventListener('click', openPanel);
 
 const gate = $('#gate'); let gateT = null;
-gate.addEventListener('pointerdown', e => { e.preventDefault(); gateT = setTimeout(() => { gateT = null; openPanel(); }, 1500); });
+gate.addEventListener('pointerdown', e => { e.preventDefault(); gateT = setTimeout(() => { gateT = null; openSwitch(); }, CFG.GATE_HOLD_MS); });
 ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => gate.addEventListener(ev, () => { if (gateT) { clearTimeout(gateT); gateT = null; } }));
 
 const KEYMAP = { 1: { ArrowDown: 0, ArrowLeft: 0, ArrowRight: 0, ArrowUp: 0 }, 2: { ArrowLeft: 0, ArrowRight: 1 },
                  3: { ArrowLeft: 0, ArrowUp: 1, ArrowRight: 2 }, 4: { ArrowLeft: 0, ArrowUp: 1, ArrowDown: 2, ArrowRight: 3 } };
 document.addEventListener('keydown', e => {
-  const panelOpen = !$('#screen-parent').classList.contains('hidden');
-  if (e.key === 'Escape') { if (!panelOpen) openPanel(); else if (S.running) resumeSession(); return; }
-  if (panelOpen) { if (e.key === 'Enter' && e.target === document.body) { S.running ? resumeSession() : startSession(); } return; }
+  const panelOpen = !$('#screen-parent').classList.contains('hidden'), sheetOpen = !$('#screen-switch').classList.contains('hidden');
+  if (e.key === 'Escape') { if (panelOpen || sheetOpen) { if (S.running) resumeSession(); } else openSwitch(); return; }
+  if (panelOpen || sheetOpen) { if (e.key === 'Enter' && panelOpen && e.target === document.body) { S.running ? resumeSession() : startSession(); } return; }
+  if ((e.key === 'n' || e.key === 'N') && S.running) { stepCategory(1); return; }
+  if ((e.key === 'p' || e.key === 'P') && S.running) { stepCategory(-1); return; }
   const go = e.key === ' ' || e.key === 'Enter';
   if (S.phase === 'break') { if (go) { e.preventDefault(); if (S.breakStep) S.breakStep(); } return; }
   if (S.phase === 'done') { if (go) openPanel(); return; }
@@ -851,7 +968,17 @@ document.addEventListener('keydown', e => {
   if (S.phase === 'trial') onChoice(idx, cards[idx]); else if (S.phase === 'explore') onExploreTap(cards[idx]);
 });
 window.addEventListener('resize', relayout);
-document.addEventListener('visibilitychange', () => { if (document.hidden && S.running && !S.paused) openPanel(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && S.running && !S.paused) openSwitch(); });
+// two-finger horizontal swipe during play → next / previous category
+let sw2 = null; const appEl = $('#app');
+const mid = e => ({ x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 });
+appEl.addEventListener('touchstart', e => { sw2 = e.touches.length === 2 ? mid(e) : null; }, { passive: true });
+appEl.addEventListener('touchmove', e => {
+  if (!sw2 || e.touches.length !== 2 || !S.running || S.paused) return;
+  const m = mid(e), dx = m.x - sw2.x, dy = m.y - sw2.y;
+  if (Math.abs(dx) > 90 && Math.abs(dy) < 70) { sw2 = null; stepCategory(dx < 0 ? 1 : -1); }
+}, { passive: true });
+appEl.addEventListener('touchend', () => { sw2 = null; }, { passive: true });
 document.addEventListener('touchmove', e => { if ($('#screen-parent').classList.contains('hidden')) e.preventDefault(); }, { passive: false });
 document.addEventListener('gesturestart', e => e.preventDefault(), { passive: false });
 document.addEventListener('contextmenu', e => e.preventDefault());
@@ -865,7 +992,7 @@ if (location.protocol === 'https:' && !/claude|anthropic/i.test(location.hostnam
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   } catch (e) {}
 }
-window.TT = { S, CFG, settings, LEVELS, DOMAINS, ITEMS, ladder, dprog, levelCap, progress: () => progress, startSession, nextBlock, runTrial };
+window.TT = { S, CFG, settings, LEVELS, DOMAINS, ITEMS, TTS, ladder, dprog, levelCap, progress: () => progress, startSession, nextBlock, runTrial, jumpTo, stepCategory, openSwitch };
 })();
 </script>
 </body>
