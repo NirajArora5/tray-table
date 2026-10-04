@@ -67,7 +67,7 @@ body{height:100%;margin:0;background:var(--bg);color:var(--fg);
 .shape{width:1em;height:1em;display:block;fill:#6a5cff}
 .num{flex-direction:column;gap:.1em}
 .num .numeral{font-weight:800;font-size:1em}
-.num .dots{font-size:.26em;letter-spacing:.12em;width:3.2em;line-height:1.15;text-align:center;word-break:break-all}
+.num .dots{font-size:.24em;letter-spacing:.1em;line-height:1.15;text-align:center;white-space:nowrap}
 .letter{font-weight:800}
 .card.pad{flex-direction:column;gap:2cqmin}
 .count-big{font-size:min(22vh,24vw);font-size:54cqmin;font-weight:800;line-height:1;min-height:1em;display:flex;align-items:center;justify-content:center}
@@ -80,9 +80,9 @@ body{height:100%;margin:0;background:var(--bg);color:var(--fg);
 
 /* ---- celebrate ---- */
 #celebrate{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  background:rgba(255,255,255,.55);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
-@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) #celebrate{background:rgba(14,18,36,.62)} }
-:root[data-theme="dark"] #celebrate{background:rgba(14,18,36,.62)}
+  background:rgba(255,255,255,.93)}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) #celebrate{background:rgba(14,18,36,.93)} }
+:root[data-theme="dark"] #celebrate{background:rgba(14,18,36,.93)}
 #celebrate .big .item{font-size:min(46vh,56vw)}
 #celebrate .big{animation:pop .6s ease}
 #celebrate .label{font-size:min(6vh,9vw);font-weight:800;margin-top:10px;text-transform:capitalize}
@@ -235,7 +235,9 @@ const CFG = {
   RESHUFFLE_MS: 25000,    // explore deals a new set
   PROMOTE_N: 8, PROMOTE_ACC: 0.8,   // 80% clean first taps over the last 8 → next step
   DEMOTE_N: 6, DEMOTE_ACC: 0.5,     // under 50% over the last 6 → step back
-  EXPLORE_TAPS: 12, EXPLORE_RATIO: 0.7, // leave Explore once 70% of 12+ taps land on things
+  EXPLORE_TAPS: 12, EXPLORE_RATIO: 0.7, // leave Explore once 70% of 12+ taps land on things …
+  EXPLORE_MIN_GAP_MS: 400, EXPLORE_DISTINCT: 3, // … paced at least this far apart, on at least this many different things
+  COUNT_PROMOTE_N: 12, COUNT_PROMOTE_ACC: 0.85, COUNT_STEADY: 0.6, COUNT_GAP_MIN_MS: 300, COUNT_GAP_MAX_MS: 2500, // counting: clean = reached without nudges, taps mostly paced like counting
   REVIEW_P: 0.15,         // share of trials run one step easier (confidence, not scored)
   MISS_STREAK: 3, SUPPORT_TRIALS: 2,  // 3 misses in a row → 2 can't-miss trials
   SPAM_TAPS: 6, SPAM_WINDOW_MS: 2000, // mashing → explore burst
@@ -315,7 +317,7 @@ function renderItem(it) {
   if (k === 'emoji')  return `<span class="item">${it.val}</span>`;
   if (k === 'swatch') return `<span class="item"><span class="swatch" style="background:${it.val}"></span></span>`;
   if (k === 'shape')  return `<span class="item"><svg class="shape" viewBox="0 0 100 100" aria-hidden="true">${SHAPES[it.val]}</svg></span>`;
-  if (k === 'number' || k === 'count') return `<span class="item num"><span class="numeral">${it.val}</span><span class="dots">${'●'.repeat(it.val)}</span></span>`;
+  if (k === 'number' || k === 'count') return `<span class="item num"><span class="numeral">${it.val}</span><span class="dots">${it.val <= 5 ? '●'.repeat(it.val) : '●'.repeat(5) + '<br>' + '●'.repeat(it.val - 5)}</span></span>`;
   return `<span class="item letter">${it.val}</span>`;
 }
 
@@ -342,7 +344,7 @@ const S = {
   phase: 'off', trial: null, explore: null, missStreak: 0, support: 0, stats: null, tapTimes: [],
   idleT: null, idle2T: null, celebT: null, exploreT: null, reshuffleT: null, breakStep: null, confirmReset: false
 };
-const freshStats = () => ({ trials: 0, firstOk: 0, hints: 0, pokes: 0, spam: 0, exploreTaps: 0, reprompts: 0 });
+const freshStats = () => ({ trials: 0, firstOk: 0, support: 0, hints: 0, pokes: 0, spam: 0, exploreTaps: 0, reprompts: 0 });
 
 const T = {
   ids: new Set(),
@@ -365,8 +367,12 @@ function levelCap(d) {
   if (role === 'visual') return concreteMax() >= 2 ? top : 2;
   return top;
 }
-function recordExploreTap(d, onItem) {
-  const p = dprog(d); p.explore.all++; if (onItem) p.explore.on++;
+function recordExploreTap(d, onItem, itemId) {
+  const p = dprog(d), ex = p.explore, t = now();
+  ex.all++;
+  const paced = !ex.lastAt || t - ex.lastAt >= CFG.EXPLORE_MIN_GAP_MS; ex.lastAt = t;
+  if (onItem && paced) ex.on++;                              // a mash on one card is not exploring
+  if (onItem && itemId) { ex.seen = ex.seen || []; if (!ex.seen.includes(itemId)) ex.seen.push(itemId); }
   maybePromote(d);
 }
 function recordTrial(d, r) {
@@ -379,14 +385,16 @@ function recordTrial(d, r) {
 function maybePromote(d) {
   const p = dprog(d), cap = levelCap(d), lad = ladder(d), floor = lad[0].mode === 'explore' ? 1 : 0;
   if (p.level === 0 && lad[0].mode === 'explore') {
-    if (cap >= 1 && p.explore.all >= CFG.EXPLORE_TAPS && p.explore.on / p.explore.all >= CFG.EXPLORE_RATIO) {
+    const ex = p.explore;
+    if (cap >= 1 && ex.all >= CFG.EXPLORE_TAPS && ex.on / ex.all >= CFG.EXPLORE_RATIO && (ex.seen || []).length >= CFG.EXPLORE_DISTINCT) {
       p.level = 1; p.explore = { on: 0, all: 0 }; p.hist = p.hist.filter(h => h.level !== 1);
     }
     return;
   }
   const atL = p.hist.filter(h => h.level === p.level && !h.review);
   const acc = n => { const s = atL.slice(-n); return s.length ? s.filter(h => h.ok).length / s.length : 0; };
-  if (atL.length >= CFG.PROMOTE_N && acc(CFG.PROMOTE_N) >= CFG.PROMOTE_ACC && p.level < cap) {
+  const isCount = lad[p.level].mode === 'count', N = isCount ? CFG.COUNT_PROMOTE_N : CFG.PROMOTE_N, ACC = isCount ? CFG.COUNT_PROMOTE_ACC : CFG.PROMOTE_ACC;
+  if (atL.length >= N && acc(N) >= ACC && p.level < cap) {
     p.level++; p.hist = p.hist.filter(h => h.level !== p.level);
   } else if (atL.length >= CFG.DEMOTE_N && acc(CFG.DEMOTE_N) < CFG.DEMOTE_ACC && p.level > floor) {
     p.level--; p.hist = p.hist.filter(h => h.level !== p.level);
@@ -436,7 +444,7 @@ function makeCountTrial(d, level, support, review) {
   else if (review && level > 0) { lo = lad[level - 1].min; hi = lad[level - 1].max; }
   const set = ITEMS[d].filter(it => it.val >= lo && it.val <= hi);
   const target = pickTarget(d, set, S.trial ? S.trial.target.id : null);
-  return { mode: 'count', level: L.id, support, review, target, obj: rand(COUNT_OBJECTS), count: 0, nudged: false,
+  return { mode: 'count', level: L.id, support, review, target, obj: rand(COUNT_OBJECTS), count: 0, nudged: false, lastTapAt: 0, gaps: [],
            choices: [], cue: 'count', wrongs: 0, hint: false, firstTap: true, readyAt: 0, startedAt: now(), done: false,
            prompt: `Let's count to ${target.name}! Tap, tap!` };
 }
@@ -568,6 +576,7 @@ function startCalm(opts) {
   $('#bubbles').innerHTML = '';
   TTS.say('Nice and slow. Pop the bubbles.');
   const spawn = () => { if (S.phase !== 'calm' || S.paused) return; makeBubble(); T.after(800 + Math.random() * 700, spawn); };
+  for (let i = 0; i < 3; i++) makeBubble(-10 - i * 25);
   spawn();
   const left = S.endAt - now(), ms = opts && opts.ms ? Math.min(opts.ms, left) : left;
   T.after(Math.max(800, ms), (opts && opts.ms && ms < left - 500) ? nextBlock : finishSession);
@@ -647,14 +656,14 @@ function setBg(key) {
 const KEYGLYPH = { 1: ['↓'], 2: ['←', '→'], 3: ['←', '↑', '→'], 4: ['←', '↑', '↓', '→'] };
 function layoutChoices(list) {
   const ch = $('#choices'), k = list.length, landscape = window.innerWidth > window.innerHeight;
-  const cols = landscape ? k : (k <= 2 ? k : 2), rows = Math.ceil(k / cols);
+  const cols = landscape ? k : (k <= 2 ? 1 : 2), rows = Math.ceil(k / cols);
   ch.style.gridTemplateColumns = `repeat(${cols},1fr)`; ch.style.gridTemplateRows = `repeat(${rows},1fr)`;
   ch.innerHTML = list.map((it, i) =>
     `<div class="card${(!landscape && k === 3 && i === 2) ? ' span2' : ''}" data-i="${i}" data-id="${it.id}"><span class="key">${KEYGLYPH[k][i]}</span>${renderItem(it)}</div>`).join('');
 }
 function relayout() {
   const cards = $$('#choices .card'); const k = cards.length; if (!k) return;
-  const landscape = window.innerWidth > window.innerHeight, cols = landscape ? k : (k <= 2 ? k : 2);
+  const landscape = window.innerWidth > window.innerHeight, cols = landscape ? k : (k <= 2 ? 1 : 2);
   $('#choices').style.gridTemplateColumns = `repeat(${cols},1fr)`; $('#choices').style.gridTemplateRows = `repeat(${Math.ceil(k / cols)},1fr)`;
   cards.forEach((c, i) => c.classList.toggle('span2', !landscape && k === 3 && i === 2));
 }
@@ -690,14 +699,16 @@ function renderCountTrial(tr) {
 }
 function onPadTap() {
   const tr = S.trial; if (!tr || tr.done || tr.mode !== 'count') return;
-  const n = ++tr.count;
+  const n = ++tr.count, t = now();
+  if (tr.lastTapAt) tr.gaps.push(t - tr.lastTapAt); tr.lastTapAt = t;
   const big = $('#choices .count-big'), row = $('#choices .count-row');
   if (big) big.innerHTML = `<span class="n">${n}</span>`;
   if (row) { const sp = document.createElement('span'); sp.textContent = tr.obj[1]; row.appendChild(sp); }
   SFX.count(n); TTS.say(NUMWORDS[n] || String(n), 'latest');
   if (n >= tr.target.val) {
     tr.done = true; clearIdle();
-    finishTrial(!tr.nudged, now() - tr.startedAt);
+    const steady = tr.gaps.length ? tr.gaps.filter(g => g >= CFG.COUNT_GAP_MIN_MS && g <= CFG.COUNT_GAP_MAX_MS).length / tr.gaps.length : 1;
+    finishTrial(!tr.nudged && steady >= CFG.COUNT_STEADY, now() - tr.startedAt);
     const word = tr.target.name, things = tr.target.val === 1 ? tr.obj[0] : tr.obj[2];
     celebrateHTML(`<span class="item num"><span class="numeral">${tr.target.val}</span></span><div class="celebrate-row">${tr.obj[1].repeat(tr.target.val)}</div>`,
       word, `${rand(CHEERS)} ${cap1(word)}. ${cap1(word)} ${things}.`, runTrial);
@@ -721,7 +732,8 @@ function onChoice(i, card) {
   }
 }
 function finishTrial(ok, rt) {
-  const tr = S.trial; S.stats.trials++; if (ok) S.stats.firstOk++;
+  const tr = S.trial;
+  if (tr.support) S.stats.support++; else { S.stats.trials++; if (ok) S.stats.firstOk++; }
   if (!tr.support) recordTrial(S.dom, { level: tr.level, ok, hint: tr.hint, rt, target: tr.target.id, review: tr.review, t: now() });
   if (ok) S.missStreak = 0;
   else if (++S.missStreak >= CFG.MISS_STREAK) { S.missStreak = 0; S.support = CFG.SUPPORT_TRIALS; }
@@ -803,7 +815,7 @@ function onExploreTap(card) {
   const it = ex.choices[+card.dataset.i]; if (!it) return;
   card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
   SFX.play('tap'); TTS.say(`${cap1(it.name)}. ${it.say}`, 'latest');
-  S.stats.exploreTaps++; ex.taps++; recordExploreTap(S.dom, true); save();
+  S.stats.exploreTaps++; ex.taps++; recordExploreTap(S.dom, true, it.id); save();
   if (ex.taps % 8 === 0) dealExplore();
   if (!ex.poke && dprog(S.dom).level > 0) {   // graduated out of Explore mid-block
     T.clear(S.exploreT); T.clear(S.reshuffleT); SFX.play('yay');
@@ -811,10 +823,11 @@ function onExploreTap(card) {
   }
 }
 function onExploreBlank() { if (S.explore) recordExploreTap(S.dom, false); }
-function makeBubble() {
+function makeBubble(startVh) {
   const b = document.createElement('div'); b.className = 'bubble';
   const sz = 44 + Math.random() * 90;
   b.style.width = b.style.height = sz + 'px'; b.style.left = (5 + Math.random() * 85) + '%';
+  if (startVh !== undefined) b.style.bottom = (-startVh) + 'vh';
   b.style.animationDuration = (9 + Math.random() * 6) + 's';
   b.innerHTML = '<i></i>';
   b.addEventListener('pointerdown', () => { if (b.classList.contains('popped')) return; b.classList.add('popped'); SFX.play('pop'); setTimeout(() => b.remove(), 350); });
@@ -837,7 +850,8 @@ function stopTimebar() { if (tbI) { clearInterval(tbI); tbI = null; } }
 function renderSwitch() {
   const order = [...settings.domains, ...Object.keys(DOMAINS).filter(d => !settings.domains.includes(d))];
   const inPlay = S.phase !== 'break' && S.phase !== 'calm';
-  $('#switch').innerHTML = `<div><h2 style="font-size:24px;margin:0">Jump to</h2><p class="note" style="margin:4px 0 0">Paused. Pick anything, or resume where you were.</p></div>
+  const left = Math.max(0, S.endAt - (S.paused ? S.pauseAt : now()));
+  $('#switch').innerHTML = `<div><h2 style="font-size:24px;margin:0">Jump to</h2><p class="note" style="margin:4px 0 0">Paused with ${fmt(left)} left. Pick anything, or resume where you were.</p></div>
     <div class="jump-grid">${order.map(d => `<button class="jump${d === S.dom && inPlay ? ' cur' : ''}${settings.domains.includes(d) ? '' : ' off'}" data-act="jump" data-v="${d}"><b>${DOMAINS[d].name}</b><span>${ladder(d)[dprog(d).level].name}${settings.domains.includes(d) ? '' : ', not in rotation'}</span></button>`).join('')}
       <button class="jump special" data-act="wiggle"><b>Wiggle break</b><span>two moves, about 20 seconds</span></button>
       <button class="jump special" data-act="calm"><b>Calm bubbles</b><span>two minutes, then back to play</span></button></div>
@@ -866,6 +880,7 @@ function renderPanel() {
       <dt>Trials</dt><dd>${st.trials}</dd>
       <dt>Clean rounds</dt><dd>${acc}</dd>
       <dt>Hints needed</dt><dd>${st.hints}</dd>
+      <dt>Can't-miss rounds</dt><dd>${st.support}</dd>
       <dt>Idle nudges</dt><dd>${st.pokes}</dd>
       <dt>Mash resets</dt><dd>${st.spam}</dd>
       <dt>Explore taps</dt><dd>${st.exploreTaps}</dd></dl></div>`;
