@@ -1,0 +1,36 @@
+# Android debug APK: built on every push to main (and on PRs, so the shell is verified before merge),
+# attached to the run as an artifact. Also checks the built APK asks for no permissions at all.
+name: android
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  debug-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run www && npx cap sync android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew assembleDebug --no-daemon
+        working-directory: android
+      - name: The APK must request no permissions
+        run: |
+          AAPT=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -1)
+          "$AAPT" dump permissions android/app/build/outputs/apk/debug/app-debug.apk | tee perms.txt
+          if grep -q "uses-permission" perms.txt; then echo "::error::the APK requests permissions; the game must need none"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toddler-time-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

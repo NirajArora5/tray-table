@@ -1,0 +1,53 @@
+# Toddler Time, iOS release lane. Runs on the GitHub macOS runner (.github/workflows/ios.yml) and on a Mac:
+#   cd ios/App && bundle install && bundle exec fastlane beta
+# Environment (repository secrets on CI, exported in the shell locally; README "CI builds" explains where each comes from):
+#   APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_API_ISSUER_ID, APP_STORE_CONNECT_API_KEY_P8 (base64 of the .p8)
+#   APPLE_TEAM_ID
+#   IOS_DIST_CERT_P12 (base64 of the Apple Distribution certificate .p12) and IOS_DIST_CERT_PASSWORD, only read on CI;
+#   on a Mac the certificate is expected in the login keychain already.
+default_platform(:ios)
+
+APP_ID = "com.narora.toddlertime"
+
+platform :ios do
+  desc "Signed App Store build, uploaded to TestFlight"
+  lane :beta do
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
+      issuer_id: ENV.fetch("APP_STORE_CONNECT_API_ISSUER_ID"),
+      key_content: ENV.fetch("APP_STORE_CONNECT_API_KEY_P8"),
+      is_key_content_base64: true,
+      in_house: false
+    )
+    team = ENV.fetch("APPLE_TEAM_ID")
+
+    if ENV["CI"]
+      setup_ci   # a throwaway keychain, unlocked, that xcodebuild can use without prompts
+      p12 = File.join(Dir.tmpdir, "dist.p12")
+      File.binwrite(p12, Base64.decode64(ENV.fetch("IOS_DIST_CERT_P12")))
+      import_certificate(
+        certificate_path: p12,
+        certificate_password: ENV.fetch("IOS_DIST_CERT_PASSWORD"),
+        keychain_name: ENV.fetch("MATCH_KEYCHAIN_NAME"),
+        keychain_password: ENV.fetch("MATCH_KEYCHAIN_PASSWORD")
+      )
+    end
+
+    # The App Store provisioning profile is created or refreshed through the API key, so it is never a secret.
+    get_provisioning_profile(api_key: api_key, app_identifier: APP_ID, team_id: team, filename: "appstore.mobileprovision")
+    profile = lane_context[SharedValues::SIGH_NAME]
+    update_code_signing_settings(
+      path: "App.xcodeproj", targets: ["App"], use_automatic_signing: false,
+      team_id: team, code_sign_identity: "Apple Distribution", profile_name: profile, bundle_identifier: APP_ID
+    )
+
+    build = latest_testflight_build_number(api_key: api_key, app_identifier: APP_ID, team_id: team, initial_build_number: 0) + 1
+    build_app(
+      project: "App.xcodeproj", scheme: "App", configuration: "Release", export_method: "app-store",
+      output_directory: "build", output_name: "ToddlerTime.ipa",
+      xcargs: "CURRENT_PROJECT_VERSION=#{build}",
+      export_options: { provisioningProfiles: { APP_ID => profile } }
+    )
+    upload_to_testflight(api_key: api_key, skip_waiting_for_build_processing: true, changelog: "Build #{build} from #{ENV['GITHUB_SHA'] || 'local'}")
+  end
+end

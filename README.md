@@ -40,3 +40,19 @@ When you change `index.html`, bump `CACHE` in `sw.js` so installed copies refres
 - Inside a shell the page skips the service worker and the grown-up panel says "Installed app".
 - Icons and splash screens come from `icon-512.png`: `npm run assets` rebuilds the 1024px sources in `assets/` and fans them out to both projects. Replace `icon-512.png` with a sharper master when there is one.
 - `tests/native.js` (part of `npm test`) checks the shells' config: bundle id, no permissions, orientations, audio session, and that the page behaves inside a shell.
+
+## CI builds
+- **Android**: `.github/workflows/android.yml` builds a debug APK on every push to main and every PR, checks it requests no permissions, and attaches it to the run (Actions → android → the run → Artifacts → `toddler-time-debug-apk`). Install it on a phone with developer mode on.
+- **iOS, simulator**: `.github/workflows/ios.yml` compiles the shell for the iOS simulator on every push to main and every PR. No secrets needed.
+- **iOS, TestFlight**: the `testflight` job in the same workflow runs only by hand (Actions → ios → Run workflow). It runs `bundle exec fastlane beta` from `ios/App`, which signs a Release archive and uploads it to TestFlight. The same lane runs on a Mac with the variables below exported. It needs these six repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | What it is | Where to get it |
+|---|---|---|
+| `APP_STORE_CONNECT_API_KEY_ID` | Key ID of an App Store Connect API key | App Store Connect → Users and Access → Integrations → App Store Connect API → Team Keys → + (role: App Manager). The ID is shown in the list. |
+| `APP_STORE_CONNECT_API_ISSUER_ID` | Issuer ID | Same page, top of the Team Keys section. |
+| `APP_STORE_CONNECT_API_KEY_P8` | The key file, base64 | Download the `.p8` once (Apple only offers it once), then `base64 -i AuthKey_XXXX.p8 \| pbcopy`. |
+| `APPLE_TEAM_ID` | 10-character team id | developer.apple.com → Account → Membership details. |
+| `IOS_DIST_CERT_P12` | Apple Distribution certificate with its private key, base64 | Xcode → Settings → Accounts → your team → Manage Certificates → + → Apple Distribution. Then Keychain Access → My Certificates → right-click the "Apple Distribution: …" entry → Export → .p12 with a password. `base64 -i dist.p12 \| pbcopy`. |
+| `IOS_DIST_CERT_PASSWORD` | The password you gave that .p12 | Same export step. |
+
+Before the first run, also do once by hand: register the bundle id `com.narora.toddlertime` (developer.apple.com → Identifiers) and create the app record in App Store Connect (My Apps → + → iOS, name Toddler Time, that bundle id). The provisioning profile is created and refreshed by the lane through the API key, so it is never a secret. Build numbers come from the last TestFlight build plus one.

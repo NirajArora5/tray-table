@@ -8,3 +8,9 @@ android/.gradle/
 android/build/
 android/app/build/
 android/local.properties
+ios/App/build/
+ios/App/fastlane/report.xml
+ios/App/fastlane/*.mobileprovision
+ios/App/.bundle/
+ios/App/vendor/
+*.ipa
