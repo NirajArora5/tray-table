@@ -1,0 +1,12 @@
+{
+  "name": "tray-table",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Offline toddler game for planes, restaurants and big feelings. The game is index.html; everything else is tooling.",
+  "scripts": {
+    "test": "node tests/test.js",
+    "sim": "node tests/sim.js",
+    "serve": "python3 -m http.server 8765"
+  },
+  "devDependencies": { "jsdom": "^26.0.0" }
+}
