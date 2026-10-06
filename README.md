@@ -20,8 +20,15 @@ Before boarding: Settings → Accessibility → Guided Access → on. Open Tray 
 - Mute switch: the game plays a silent loop so its voice stays audible with the iPad's ring/silent switch on. Use the in-game Sound setting to go quiet.
 - The grown-up panel shows whether this copy is saved for airplane mode.
 
+## Celebrations and the recap
+Every clean find (first tap, no hint) gets a cheer. Cheers rotate through twelve in a fixed order, and once per cycle the cheer is the composed "You found the ___!" (two clips). Nothing about a celebration is random:
+- **Normal**: the thing, its name, its sound. 1.5 s.
+- **New!**: the first clean find of that thing, ever. A New! badge, "New!" spoken first. 2.2 s.
+- **Mini parade**: every third clean find in a row. The last three march past and are named. 2.4 s.
+The all-done screen lists everything found cleanly today ("Today you met…"), across sessions, so you can celebrate it together; it resets at midnight. The grown-up panel counts new finds and parades per session.
+
 ## Voice pack
-`tools/voice/` regenerates the recorded voice with a different Piper voice (see the docstring in `pack.py`). It takes about three minutes on a laptop.
+`tools/voice/` regenerates the recorded voice with a different Piper voice (see the docstring in `pack.py`). It takes about three minutes on a laptop. After adding a phrase to the game, add it to `phrases.js`, then `node phrases.js && python3 pack.py en-us-ryan-high --only-missing` synthesizes just the new clips and keeps the rest byte-for-byte. The macOS piper-tts wheels (1.3 to 1.8) ship with a broken espeak data path; run it on Linux, for example `docker run --rm -v "$PWD":/app -v "$PWD/tools/voice":/voice -w /voice python:3.11-slim bash -c "apt-get update -qq && apt-get install -y -qq ffmpeg && pip install -q piper-tts && python /app/tools/voice/pack.py en-us-ryan-high --only-missing"` with the `.onnx` voice files in `tools/voice/`.
 
 ## Tuning
 - `CFG` at the top of the script: block length, break cadence, promotion/demotion thresholds, idle timings.

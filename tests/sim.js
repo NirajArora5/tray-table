@@ -15,7 +15,7 @@ function boot() {
   const tap = el => el && el.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
   const TT = w.TT;
   Object.assign(TT.CFG, { BLOCK_MS: sc(75000), CALM_MS: sc(60000), MIN_BLOCK_MS: sc(15000), BREAK_STEP_MS: sc(10000), PEEK_MS: sc(1600),
-    CELEBRATE_MS: sc(1500), EXPLORE_MIN_GAP_MS: sc(400), COUNT_GAP_MIN_MS: sc(300), COUNT_GAP_MAX_MS: sc(2500), IDLE_MS: sc(12000), POKE_MS: sc(18000), POKE_LEN_MS: sc(20000), RESHUFFLE_MS: sc(25000), CALM_JUMP_MS: sc(120000) });
+    CELEBRATE_MS: sc(1500), CELEBRATE_NEW_MS: sc(2200), CELEBRATE_PARADE_MS: sc(2400), EXPLORE_MIN_GAP_MS: sc(400), COUNT_GAP_MIN_MS: sc(300), COUNT_GAP_MAX_MS: sc(2500), IDLE_MS: sc(12000), POKE_MS: sc(18000), POKE_LEN_MS: sc(20000), RESHUFFLE_MS: sc(25000), CALM_JUMP_MS: sc(120000) });
   TT.settings.minutes = 10 / SCALE; TT.settings.sound = true; TT.settings.domains = ['animals', 'vehicles', 'food', 'counting', 'letters'];
   return { w, d, tap, TT };
 }
@@ -74,7 +74,7 @@ async function run(name) {
   // choice-count check at Find 4 (the screenshots showed 3 cards twice)
   {
     const { d, TT } = boot();
-    Object.assign(TT.CFG, { BLOCK_MS: 1e9, IDLE_MS: 1e9, POKE_MS: 1e9, CELEBRATE_MS: 1e9 });
+    Object.assign(TT.CFG, { BLOCK_MS: 1e9, IDLE_MS: 1e9, POKE_MS: 1e9, CELEBRATE_MS: 1e9, CELEBRATE_NEW_MS: 1e9, CELEBRATE_PARADE_MS: 1e9 });
     TT.settings.minutes = 60; TT.settings.domains = ['vehicles']; TT.dprog('vehicles').level = 4;
     d.querySelector('[data-act="start"]').click(); await sleep(10);
     const counts = {};

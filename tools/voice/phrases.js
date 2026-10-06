@@ -17,6 +17,6 @@ TT.CHEERS.forEach((c, i) => P['cheer:' + i] = c);
 TT.WIGGLES.forEach(([e, t], i) => P['wiggle:' + i] = t);
 TT.COUNT_OBJECTS.forEach(([one, e, many]) => { P['one:' + one] = one + '.'; P['many:' + one] = many + '.'; });
 Object.assign(P, { 'lets-play': "Let's play!", 'here': 'Here!', 'tap-tap': 'Tap, tap!', 'what-do-you-see': 'What do you see?', 'touch-one': 'Touch one!',
-  'lets-count-to': "Let's count to", 'calm': 'Nice and slow. Pop the bubbles.', 'all-done': 'All done! Great job!', 'hi-lets-play': "Hi! Let's play." });
+  'lets-count-to': "Let's count to", 'new': 'New!', 'you-found-the': 'You found the', 'calm': 'Nice and slow. Pop the bubbles.', 'all-done': 'All done! Great job!', 'hi-lets-play': "Hi! Let's play." });
 fs.writeFileSync(__dirname + '/phrases.json', JSON.stringify(P, null, 1));
 console.log(Object.keys(P).length, 'phrases');
