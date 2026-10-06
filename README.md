@@ -16,7 +16,12 @@ Before boarding: Settings → Accessibility → Guided Access → on. Open Tray 
 ## While playing
 - Hold the top-right corner for a moment (or press `Esc`): the jump sheet. Switch category, wiggle break, calm bubbles (2 min, then back to play), end early, or open Settings.
 - Two-finger swipe left/right: next/previous category without the sheet (`N` / `P` on a keyboard).
-- Voice: the iPad's built-in voice is the compact one. Download an Enhanced or Premium voice (Settings → Accessibility → Spoken Content → Voices → English → Samantha or Ava) and pick it in Settings → Voice. "Slow and clear" slows the speech rate.
+- Voice: the game ships a recorded voice pack (317 clips, generated offline with a neural TTS, bundled inside index.html) so it sounds the same on every device and needs no download. Settings → Voice switches to the device voice instead; if you use that on an iPad, download an Enhanced or Premium voice first (Settings → Accessibility → Spoken Content → Voices → English → Samantha or Ava).
+- Mute switch: the game plays a silent loop so its voice stays audible with the iPad's ring/silent switch on. Use the in-game Sound setting to go quiet.
+- The grown-up panel shows whether this copy is saved for airplane mode.
+
+## Voice pack
+`tools/voice/` regenerates the recorded voice with a different Piper voice (see the docstring in `pack.py`). It takes about three minutes on a laptop.
 
 ## Tuning
 - `CFG` at the top of the script: block length, break cadence, promotion/demotion thresholds, idle timings.
