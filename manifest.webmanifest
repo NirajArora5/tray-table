@@ -1,6 +1,6 @@
 {
-  "name": "Tray Table",
-  "short_name": "Tray Table",
+  "name": "Toddler Time",
+  "short_name": "Toddler Time",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
