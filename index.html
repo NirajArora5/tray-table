@@ -91,6 +91,8 @@ body{height:100%;margin:0;background:var(--bg);color:var(--fg);
 .booth .ph{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:12px;background:var(--card)}
 .booth .ph b{flex:1;font-weight:600;font-size:15px}.booth .ph.on b{color:#19b38a}.booth .ph.live{outline:2px solid var(--danger)}
 .btn.mini{padding:8px 12px;font-size:15px;border-radius:10px}
+.item.photo img{width:1em;height:1em;object-fit:cover;border-radius:18%;display:block;background:var(--edge)}
+.booth .thumb{width:44px;height:44px;object-fit:cover;border-radius:10px;background:var(--edge);flex:none}
 #celebrate .badge{font-size:min(5vh,8vw);font-weight:900;color:#fff;background:#ff5a7a;border-radius:999px;padding:.15em .7em;margin-bottom:6px;animation:pop .5s ease}
 #celebrate .parade{display:flex;gap:min(3vh,4vw);align-items:center}
 #celebrate .parade .item{font-size:min(30vh,26vw);animation:march .9s cubic-bezier(.2,.8,.3,1) both}
@@ -323,6 +325,7 @@ const RAW = {
     ['one', 1], ['two', 2], ['three', 3], ['four', 4], ['five', 5]] },
   letters: { name: 'Letters', kind: 'letter', role: 'abstract', bg: ['#ebe6fb', '#26203a'], items: [
     ['A', 'A'], ['B', 'B'], ['O', 'O'], ['C', 'C'], ['M', 'M'], ['S', 'S'], ['D', 'D'], ['E', 'E']] },
+  family: { name: 'Family', kind: 'photo', role: 'concrete', bg: ['#fff0e6', '#332419'], items: [] },   // the parent's own labelled photos, see FAMILY below
   counting: { name: 'Counting', kind: 'count', role: 'skill', ladder: COUNT_LADDER, bg: ['#ddf3fb', '#17303a'], items: [
     ['one', 1], ['two', 2], ['three', 3], ['four', 4], ['five', 5], ['six', 6], ['seven', 7], ['eight', 8], ['nine', 9], ['ten', 10]] }
 };
@@ -338,6 +341,7 @@ for (const d of Object.keys(RAW)) {
 function renderItem(it) {
   const k = DOMAINS[it.dom].kind;
   if (k === 'emoji')  return `<span class="item">${it.val}</span>`;
+  if (k === 'photo')  return `<span class="item photo"><img src="${photoURL[it.val] || ''}" alt=""></span>`;
   if (k === 'swatch') return `<span class="item"><span class="swatch" style="background:${it.val}"></span></span>`;
   if (k === 'shape')  return `<span class="item"><svg class="shape" viewBox="0 0 100 100" aria-hidden="true">${SHAPES[it.val]}</svg></span>`;
   if (k === 'number' || k === 'count') return `<span class="item num"><span class="numeral">${it.val}</span><span class="dots">${it.val <= 5 ? '●'.repeat(it.val) : '●'.repeat(5) + '<br>' + '●'.repeat(it.val - 5)}</span></span>`;
@@ -368,7 +372,7 @@ const S = {
   running: false, paused: false, start: 0, endAt: 0, pauseAt: 0, pausedTotal: 0,
   block: 0, order: [], dom: null, blockEndsAt: 0, justBroke: false,
   phase: 'off', trial: null, explore: null, missStreak: 0, support: 0, stats: null, tapTimes: [],
-  cheerIdx: 0, cleanStreak: 0, recentClean: [], lastTier: 'normal', rec: null, recErr: '', confirmClear: false,
+  cheerIdx: 0, cleanStreak: 0, recentClean: [], lastTier: 'normal', rec: null, recErr: '', confirmClear: false, gateOk: false, gateQ: null, gateErr: '',
   idleT: null, idle2T: null, celebT: null, exploreT: null, reshuffleT: null, breakStep: null, confirmReset: false
 };
 const freshStats = () => ({ trials: 0, firstOk: 0, support: 0, hints: 0, pokes: 0, spam: 0, exploreTaps: 0, reprompts: 0, news: 0, parades: 0 });
@@ -558,15 +562,16 @@ const CLIPS = (() => { try { return JSON.parse(document.getElementById('clips').
 const b64ToBuf = b64 => { const bin = atob(b64), arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); return arr.buffer; };
 const blobToBuf = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsArrayBuffer(blob); });
 const blobToB64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
-const OWN = {
-  ids: new Set(), blobs: {}, ready: null, DIR: 'voice',
+// A blob store that lives on this device only: IndexedDB on the web, the app's private Data directory in the shells.
+function makeStore(o) { return {
+  ids: new Set(), blobs: {}, ready: null, DIR: o.dir, DB: o.db, EXT: o.ext, TYPE: o.type, onChange: null,
   fs() { const C = window.Capacitor; return NATIVE && C && C.Plugins && C.Plugins.Filesystem ? C.Plugins.Filesystem : null; },
-  file(id) { return this.DIR + '/' + encodeURIComponent(id) + '.wav'; },
-  db() { return new Promise((res, rej) => { try { const r = indexedDB.open('tt-voice', 1); r.onupgradeneeded = () => r.result.createObjectStore('clips'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }); },
+  file(id) { return this.DIR + '/' + encodeURIComponent(id) + '.' + this.EXT; },
+  db() { return new Promise((res, rej) => { try { const r = indexedDB.open(this.DB, 1); r.onupgradeneeded = () => r.result.createObjectStore('clips'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }); },
   idb(mode, fn) { return this.db().then(db => new Promise((res, rej) => { const tx = db.transaction('clips', mode); const r = fn(tx.objectStore('clips')); tx.oncomplete = () => { db.close(); res(r && r.result); }; tx.onerror = () => { db.close(); rej(tx.error); }; })); },
   load() {
     if (!this.ready) this.ready = (this.fs()
-      ? this.fs().readdir({ path: this.DIR, directory: 'DATA' }).then(r => (r.files || []).map(f => decodeURIComponent((f.name || f).replace(/\.wav$/, ''))))
+      ? this.fs().readdir({ path: this.DIR, directory: 'DATA' }).then(r => (r.files || []).map(f => decodeURIComponent((f.name || f).replace(/\.[a-z0-9]+$/, ''))))
       : this.idb('readonly', st => st.getAllKeys())
     ).then(ids => { this.ids = new Set(ids || []); }).catch(() => { this.ids = new Set(); });
     return this.ready;
@@ -577,7 +582,7 @@ const OWN = {
     if (!this.has(id)) return Promise.resolve(null);
     if (this.blobs[id]) return Promise.resolve(this.blobs[id]);
     const p = this.fs()
-      ? this.fs().readFile({ path: this.file(id), directory: 'DATA' }).then(r => new Blob([b64ToBuf(r.data)], { type: 'audio/wav' }))
+      ? this.fs().readFile({ path: this.file(id), directory: 'DATA' }).then(r => new Blob([b64ToBuf(r.data)], { type: this.TYPE }))
       : this.idb('readonly', st => st.get(id));
     return p.then(b => { if (b) this.blobs[id] = b; return b || null; }).catch(() => null);
   },
@@ -585,14 +590,16 @@ const OWN = {
     const p = this.fs()
       ? blobToB64(blob).then(data => this.fs().writeFile({ path: this.file(id), directory: 'DATA', data, recursive: true }))
       : this.idb('readwrite', st => st.put(blob, id));
-    return p.then(() => { this.ids.add(id); this.blobs[id] = blob; AUDIO.forget(id); });
+    return p.then(() => { this.ids.add(id); this.blobs[id] = blob; if (this.onChange) this.onChange(id); });
   },
   remove(id) {
     const p = this.fs() ? this.fs().deleteFile({ path: this.file(id), directory: 'DATA' }) : this.idb('readwrite', st => st.delete(id));
-    return p.catch(() => {}).then(() => { this.ids.delete(id); delete this.blobs[id]; AUDIO.forget(id); });
+    return p.catch(() => {}).then(() => { this.ids.delete(id); delete this.blobs[id]; if (this.onChange) this.onChange(id); });
   },
   clear() { return Promise.all([...this.ids].map(id => this.remove(id))); }
-};
+}; }
+const OWN = makeStore({ db: 'tt-voice', dir: 'voice', ext: 'wav', type: 'audio/wav' });
+OWN.onChange = id => AUDIO.forget(id);
 const AUDIO = {
   bufs: {}, pending: {}, playing: null, seq: 0,
   ctx() { SFX.init(); return SFX.ctx; },
@@ -641,6 +648,53 @@ const VOICE = {
 // iPad/iPhone mute switch: Web Audio is silenced by it unless a media element is playing, so a looping silent track keeps
 // the voice audible with the switch on (the parent still has the in-game Sound setting to go silent on purpose).
 const UNMUTE = { el: null, start() { try { if (!this.el) { this.el = new Audio('data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//NwwAAAAAAAAAAAAEluZm8AAAAPAAAADgAAAiQAYWFhYWFhYW1tbW1tbW15eXl5eXl5hoaGhoaGhpKSkpKSkpKenp6enp6eqqqqqqqqqra2tra2tra2wsLCwsLCws/Pz8/Pz8/b29vb29vb5+fn5+fn5/Pz8/Pz8/P/////////AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQDaQAAAAAAAAIkB3uyowAAAAAAAAAAAAAAAAD/8xDEAAAAA0gAAAAATEFNRTMuMTAwVVVVVf/zEsQNAAADSAAAAABVVVVVVVVVVVVVVVVVVf/zEMQbAAADSAAAAABVVVVVVVVVVVVVVVVV//MQxCgAAANIAAAAAFVVVVVVVVVVVVVVVVX/8xDENQAAA0gAAAAAVVVVVVVVVVVVVVVVVf/zEMRCAAADSAAAAABVVVVVVVVVVVVVVVVV//MQxE8AAANIAAAAAFVVVVVVVVVVVVVVVVX/8xDEXAAAA0gAAAAAVVVVVVVVVVVVVVVVVf/zEMRpAAADSAAAAABVVVVVVVVVVVVVVVVV//MSxHYAAANIAAAAAFVVVVVVVVVVVVVVVVVV//MQxIQAAANIAAAAAFVVVVVVVVVVVVVVVVX/8xDEkQAAA0gAAAAAVVVVVVVVVVVVVVVVVf/zEMSeAAADSAAAAABVVVVVVVVVVVVVVVVV//MQxKsAAANIAAAAAFVVVVVVVVVVVVVVVVU='); this.el.loop = true; this.el.volume = 0.01; } this.el.play().catch(() => {}); } catch (e) {} } };
+
+// ---- Family photos: the parent's own pictures, labelled ("Grandma", "our dog"), as a Find-it category. ----
+// Photos stay on the device (same store kind as the voice). The category switches on at two labelled photos. Adding and
+// removing sit behind a parental gate in the grown-up panel. Their names have no bundled clips: the booth lists
+// "Grandma.", "Find Grandma!" and "Where's Grandma?" to record, and the device voice fills in until then.
+let family = store.get('tt.family', []);   // [{ id, name }]
+const PHOTOS = makeStore({ db: 'tt-photos', dir: 'photos', ext: 'jpg', type: 'image/jpeg' });
+const photoURL = {};
+const objURL = b => { try { return URL.createObjectURL(b); } catch (e) { return ''; } };
+function rebuildFamily() {
+  ITEMS.family = family.filter(f => f.name && PHOTOS.has(f.id)).map(f => ({ id: 'family:' + f.id, dom: 'family', name: f.name, val: f.id, say: '', label: f.name }));
+  settings.domains = settings.domains.filter(available);
+}
+function available(d) { return d !== 'family' || ITEMS.family.length >= 2; }
+const DOMS = () => Object.keys(DOMAINS).filter(available);
+function loadFamily() {
+  return PHOTOS.load().then(() => Promise.all(family.map(f => PHOTOS.get(f.id).then(b => { if (b && !photoURL[f.id]) photoURL[f.id] = objURL(b); }))))
+    .then(rebuildFamily);
+}
+// Shrink to 640 px and JPEG before storing; where there is no canvas the picked file is kept as it is.
+PHOTOS.shrink = file => new Promise(res => {
+  const url = objURL(file); if (!url || typeof Image === 'undefined') return res(file);
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const c = document.createElement('canvas'), MAX = 640, k = Math.min(1, MAX / Math.max(img.width, img.height));
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const ctx = c.getContext('2d'); if (!ctx) return res(file);
+      ctx.drawImage(img, 0, 0, c.width, c.height); c.toBlob(b => res(b || file), 'image/jpeg', 0.85);
+    } catch (e) { res(file); } finally { try { URL.revokeObjectURL(url); } catch (e) {} }
+  };
+  img.onerror = () => res(file); img.src = url;
+});
+function addPhotos(files) {
+  return Promise.all(Array.from(files || []).filter(f => !f.type || /^image\//.test(f.type)).map(file => PHOTOS.shrink(file).then(blob => {
+    const id = 'p' + now().toString(36) + Math.random().toString(36).slice(2, 6);
+    return PHOTOS.put(id, blob).then(() => { photoURL[id] = objURL(blob); family.push({ id, name: '' }); });
+  }))).then(() => { store.set('tt.family', family); rebuildFamily(); });
+}
+function namePhoto(id, name) { const f = family.find(x => x.id === id); if (f) { f.name = name.trim().slice(0, 24); store.set('tt.family', family); rebuildFamily(); } }
+function removePhoto(id) {
+  family = family.filter(f => f.id !== id); store.set('tt.family', family);
+  const iid = 'family:' + id, p = progress.domains.family; if (p) delete p.items[iid];
+  if (progress.today) progress.today.met = progress.today.met.filter(m => m !== iid);
+  rebuildFamily(); save();
+  return Promise.all([PHOTOS.remove(id), ...['name:', 'find:', 'where:'].map(k => OWN.remove(k + iid))]);
+}
 
 // The booth: getUserMedia + MediaRecorder, then the take is decoded, trimmed of silence, levelled and stored as 16-bit WAV.
 const REC = {
@@ -698,11 +752,13 @@ function ownPhrases() {
   NUMWORDS.slice(1).forEach(w => P.push(['name:counting:' + w, cap1(w) + '.']));
   WIGGLES.forEach(([e, t], i) => P.push(['wiggle:' + i, t]));
   P.push(['kid-name', settings.kidName ? settings.kidName + '!' : "Your child's name"]);
+  for (const it of ITEMS.family) P.push(['name:' + it.id, cap1(it.name) + '.'], ['find:' + it.id, `Find ${it.name}!`], ['where:' + it.id, `Where's ${it.name}?`]);
   return P.map(([id, text]) => ({ id, text }));
 }
 
 /* ================= RUNTIME ================= */
 function startSession() {
+  settings.domains = settings.domains.filter(available);
   if (!settings.domains.length) settings.domains = ['animals'];
   Object.assign(S, { running: true, paused: false, start: now(), pausedTotal: 0, block: 0, order: shuffle(settings.domains),
     stats: freshStats(), missStreak: 0, support: 0, justBroke: false, tapTimes: [], trial: null, explore: null, breakStep: null,
@@ -805,7 +861,7 @@ function resumeSession() {
 }
 // Parent jumps: straight into a category, a wiggle break, or calm bubbles — from the jump sheet, a two-finger swipe, or N/P keys.
 function jumpTo(d) {
-  if (!S.running || !DOMAINS[d]) return;
+  if (!S.running || !DOMAINS[d] || !available(d)) return;
   unpause();
   if (!settings.domains.includes(d)) { settings.domains.push(d); save(); }
   if (!S.order.includes(d)) S.order.push(d);
@@ -826,6 +882,7 @@ function jumpCalm() { if (!S.running) return; unpause(); startCalm({ ms: CFG.CAL
 
 /* ================= UI ================= */
 function show(id) {
+  if (id !== 'parent') { S.gateOk = false; S.gateErr = ''; }
   $$('.screen').forEach(s => s.classList.toggle('hidden', s.id !== 'screen-' + id));
   $('#gate').classList.toggle('hidden', id === 'parent' || id === 'switch' || !S.running);
 }
@@ -864,9 +921,10 @@ function renderTrial(tr) {
   if (tr.mode === 'count') return renderCountTrial(tr);
   S.trial = tr; S.explore = null; S.phase = 'trial'; S.tapTimes = []; show('play');
   const cue = $('#cue');
-  tr.prompt = tr.cue === 'shown' ? `Find the ${tr.target.label}!`
-            : tr.cue === 'peek'  ? `${cap1(tr.target.label)}! Find the ${tr.target.label}.`
-            : `Where's the ${tr.target.label}?`;
+  const the = DOMAINS[tr.target.dom].kind === 'photo' ? '' : 'the ';   // "Find Grandma!", not "Find the Grandma!"
+  tr.prompt = tr.cue === 'shown' ? `Find ${the}${tr.target.label}!`
+            : tr.cue === 'peek'  ? `${cap1(tr.target.label)}! Find ${the}${tr.target.label}.`
+            : `Where's ${the}${tr.target.label}?`;
   tr.clips = tr.cue === 'shown' ? ['find:' + tr.target.id] : tr.cue === 'peek' ? ['name:' + tr.target.id, 'find:' + tr.target.id] : ['where:' + tr.target.id];
   AUDIO.warm(tr.choices.flatMap(it => ['name:' + it.id, 'say:' + it.id, 'find:' + it.id, 'where:' + it.id]));
   layoutChoices(tr.choices);
@@ -1080,7 +1138,7 @@ function stopTimebar() { if (tbI) { clearInterval(tbI); tbI = null; } }
 
 /* ---- jump sheet ---- */
 function renderSwitch() {
-  const order = [...settings.domains, ...Object.keys(DOMAINS).filter(d => !settings.domains.includes(d))];
+  const order = [...settings.domains, ...DOMS().filter(d => !settings.domains.includes(d))];
   const inPlay = S.phase !== 'break' && S.phase !== 'calm';
   const left = Math.max(0, S.endAt - (S.paused ? S.pauseAt : now()));
   $('#switch').innerHTML = `<div><h2 style="font-size:24px;margin:0">Jump to</h2><p class="note" style="margin:4px 0 0">Paused with ${fmt(left)} left. Pick anything, or resume where you were.</p></div>
@@ -1134,10 +1192,11 @@ function renderPanel() {
     : `<p class="note" style="margin:0">No speech voices found on this device yet.</p>`)
     + `<div class="row" style="margin-top:10px"><div class="seg"><button data-act="rate" data-v="0.72" class="${settings.rate <= 0.75 ? 'on' : ''}">Slow and clear</button><button data-act="rate" data-v="0.85" class="${settings.rate > 0.75 ? 'on' : ''}">Normal</button></div><button class="btn" data-act="testvoice">Hear it</button></div>
     <p class="note">The voice that ships with an iPad is the compact one, which is why it sounds flat. Better ones are a free download: Settings, Accessibility, Spoken Content, Voices, English, then open Samantha or Ava and download the Enhanced or Premium version. It then shows up in this list with that label, and works offline.</p></div>`;
+  h += familyHTML();
   h += boothHTML();
-  h += `<div><h2>Categories</h2><div class="row">${Object.keys(DOMAINS).map(d =>
-    `<button class="chip ${settings.domains.includes(d) ? 'on' : ''}" data-act="dom" data-v="${d}">${DOMAINS[d].name}<span class="lvl">${ladder(d)[dprog(d).level].name}</span></button>`).join('')}</div></div>`;
-  const shown = Object.keys(DOMAINS).filter(d => settings.domains.includes(d) || dprog(d).hist.length || dprog(d).level > 0);
+  h += `<div><h2>Categories</h2><div class="row">${DOMS().map(d =>
+    `<button class="chip ${settings.domains.includes(d) ? 'on' : ''}" data-act="dom" data-v="${d}">${DOMAINS[d].name}<span class="lvl">${ladder(d)[dprog(d).level].name}</span></button>`).join('')}${available('family') ? '' : `<span class="note" style="margin:0;align-self:center">Family appears here once two photos have names (below).</span>`}</div></div>`;
+  const shown = DOMS().filter(d => settings.domains.includes(d) || dprog(d).hist.length || dprog(d).level > 0);
   h += `<div><h2>Paths</h2><p class="note" style="margin:0 0 6px">Scores move each category along its own ladder. Tap a step to override. Greyed steps unlock once a concrete category gets further.</p>${shown.map(ladderHTML).join('')}</div>`;
   h += `<div class="row"><button class="btn danger" data-act="reset">${S.confirmReset ? 'Tap again to erase all progress' : 'Reset progress'}</button></div>`;
   h += `<div class="tips">During play, hold the top-right corner for a moment (or press <code>Esc</code>) for the jump sheet: switch category, wiggle break, calm bubbles, end early, or come back here. A two-finger swipe left or right jumps categories without the sheet. On a keyboard, <code>←</code> <code>↑</code> <code>↓</code> <code>→</code> or <code>1</code> to <code>4</code> pick a card, <code>Space</code> repeats the prompt, <code>N</code> and <code>P</code> jump categories. On iPad, turn on Guided Access (Settings, Accessibility) and triple-click to lock the kid in.</div>`;
@@ -1155,6 +1214,20 @@ function boothHTML() {
   h += `<div class="booth">` + P.map(p => { const on = OWN.has(p.id), live = S.rec === p.id;
     return `<div class="ph${on ? ' on' : ''}${live ? ' live' : ''}" data-id="${p.id}"><b>${esc(p.text)}</b>${on ? `<button class="btn mini" data-act="recplay" data-v="${p.id}" aria-label="Play">▶</button>` : ''}<button class="btn mini${live ? ' danger' : ''}" data-act="rec" data-v="${p.id}">${live ? '■ Stop' : on ? '● Again' : '● Record'}</button>${on && !live ? `<button class="btn mini" data-act="recdel" data-v="${p.id}" aria-label="Delete">✕</button>` : ''}</div>`; }).join('') + `</div>`;
   if (n) h += `<div class="row" style="margin-top:8px"><button class="btn danger" data-act="recclear">${S.confirmClear ? 'Tap again to delete every recording' : 'Delete all recordings'}</button></div>`;
+  return h + `</div>`;
+}
+// Parental gate: a sum to type before photos can be added or removed. Locks again whenever the panel closes.
+function newGate() { S.gateQ = [3 + Math.floor(Math.random() * 7), 3 + Math.floor(Math.random() * 7)]; }
+function familyHTML() {
+  let h = `<div id="family"><h2>Family photos</h2><p class="note" style="margin:0 0 8px">Pictures of the people and pets they know, as a Find-it category. They stay on this device. The category switches on once two photos have names. Record their names in Your voice below so the prompts are in your voice too.</p>`;
+  if (!S.gateOk) {
+    if (!S.gateQ) newGate();
+    h += `<p class="note" style="margin:0 0 6px">Grown-ups only. What is ${S.gateQ[0]} plus ${S.gateQ[1]}?</p><div class="row"><input class="select" style="width:6em" type="number" inputmode="numeric" data-act="gate-answer" placeholder="?" aria-label="Answer"><button class="btn" data-act="gate">Unlock</button>${S.gateErr ? `<span class="note" style="margin:0;color:var(--danger)">${esc(S.gateErr)}</span>` : ''}</div>`;
+    return h + `</div>`;
+  }
+  const named = ITEMS.family.length, unnamed = family.length - named;
+  h += `<div class="row" style="margin-bottom:8px"><label class="btn primary" style="cursor:pointer">Add photos<input type="file" accept="image/*" multiple data-act="photos" style="display:none"></label><span class="note" style="margin:0" id="family-count">${named} ready${unnamed ? `, ${unnamed} need a name` : ''}</span></div>`;
+  h += `<div class="booth">` + family.map(f => `<div class="ph${f.name ? ' on' : ''}" data-id="${f.id}"><img class="thumb" src="${photoURL[f.id] || ''}" alt=""><input class="select" style="flex:1;min-width:0" data-act="pname" data-v="${f.id}" value="${esc(f.name)}" placeholder="Who is this? Grandma, our dog…" maxlength="24"><button class="btn mini" data-act="pdel" data-v="${f.id}" aria-label="Remove">✕</button></div>`).join('') + `</div>`;
   return h + `</div>`;
 }
 function boothRecord(id) {
@@ -1187,6 +1260,13 @@ $('#panel').addEventListener('click', e => {
   if (act === 'sound') settings.sound = v === '1';
   if (act === 'rate') settings.rate = +v;
   if (act === 'vmode') settings.voiceMode = v;
+  if (act === 'photos' || act === 'gate-answer' || act === 'pname' || act === 'kidname') return;   // inputs: handled on change
+  if (act === 'gate') {
+    const inp = $('#family input[data-act="gate-answer"]'), ok = inp && +inp.value === S.gateQ[0] + S.gateQ[1];
+    if (ok) { S.gateOk = true; S.gateErr = ''; } else { S.gateErr = 'Not quite, try this one.'; newGate(); }
+    return renderPanel();
+  }
+  if (act === 'pdel') { if (!S.gateOk) return; return removePhoto(v).then(renderPanel); }
   if (act === 'own') settings.ownVoice = v === '1';
   if (act === 'rec') return boothRecord(v);
   if (act === 'recplay') { SFX.init(); SFX.resume(); UNMUTE.start(); AUDIO.play([v], true); return; }
@@ -1196,7 +1276,7 @@ $('#panel').addEventListener('click', e => {
     S.confirmClear = true; setTimeout(() => { S.confirmClear = false; if (!$('#screen-parent').classList.contains('hidden')) renderPanel(); }, 3000);
   }
   if (act === 'testvoice') { SFX.init(); SFX.resume(); UNMUTE.start(); VOICE.say("Where's the cow? Cow. Moo! Let's count to three. One, two, three.", 'replace', ['where:animals:cow', 'name:animals:cow', 'say:animals:cow', 'lets-count-to', 'name:counting:three', 'name:counting:one', 'name:counting:two', 'name:counting:three'], true); return; }
-  if (act === 'dom') { const i = settings.domains.indexOf(v); if (i >= 0) settings.domains.splice(i, 1); else settings.domains.push(v); if (S.running) S.order = shuffle(settings.domains); }
+  if (act === 'dom' && available(v)) { const i = settings.domains.indexOf(v); if (i >= 0) settings.domains.splice(i, 1); else settings.domains.push(v); if (S.running) S.order = shuffle(settings.domains); }
   if (act === 'lvl') { const d = b.dataset.d, p = dprog(d), lv = Math.min(+v, levelCap(d)); p.level = lv; p.hist = p.hist.filter(h => h.level !== lv); if (lv > 0) p.explore = { on: 0, all: 0 }; }
   if (act === 'reset') {
     if (S.confirmReset) { progress = { domains: {}, sessions: 0 }; S.confirmReset = false; }
@@ -1207,6 +1287,10 @@ $('#panel').addEventListener('click', e => {
 $('#panel').addEventListener('change', e => {
   const kid = e.target.closest('input[data-act="kidname"]');
   if (kid) { settings.kidName = kid.value.trim().slice(0, 24); save(); renderPanel(); return; }
+  const pick = e.target.closest('input[data-act="photos"]');
+  if (pick) { if (S.gateOk) addPhotos(pick.files).then(() => { save(); renderPanel(); }); return; }
+  const pn = e.target.closest('input[data-act="pname"]');
+  if (pn) { if (S.gateOk) { namePhoto(pn.dataset.v, pn.value); save(); renderPanel(); } return; }
   const sel = e.target.closest('select[data-act="voice"]'); if (!sel) return;
   settings.voiceURI = sel.value; TTS.pick(); save();
   SFX.init(); SFX.resume(); TTS.say("Hi! Let's play.", 'replace', true);
@@ -1281,7 +1365,7 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 
 /* ---- boot ---- */
 renderPanel(); show('parent'); setBg(null);
-OWN.load().then(() => { if (!$('#screen-parent').classList.contains('hidden')) renderPanel(); });
+Promise.all([OWN.load(), loadFamily()]).then(() => { if (!$('#screen-parent').classList.contains('hidden')) renderPanel(); });
 if (location.protocol === 'https:' && !NATIVE && !/claude|anthropic/i.test(location.hostname)) {   // self-hosted web: real offline install (the native shells skip this)
   try {
     const m = document.createElement('link'); m.rel = 'manifest'; m.href = './manifest.webmanifest'; document.head.appendChild(m);
@@ -1289,7 +1373,7 @@ if (location.protocol === 'https:' && !NATIVE && !/claude|anthropic/i.test(locat
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   } catch (e) {}
 }
-window.TT = { S, CFG, settings, LEVELS, DOMAINS, ITEMS, TTS, CHEERS, metToday, nextCheer, OWN, AUDIO, REC, ownPhrases, renderPanel, WIGGLES, COUNT_OBJECTS, NUMWORDS, ladder, dprog, levelCap, progress: () => progress, startSession, nextBlock, runTrial, jumpTo, stepCategory, openSwitch };
+window.TT = { S, CFG, settings, LEVELS, DOMAINS, ITEMS, TTS, CHEERS, metToday, nextCheer, OWN, AUDIO, REC, ownPhrases, renderPanel, PHOTOS, DOMS, available, family: () => family, addPhotos, namePhoto, removePhoto, WIGGLES, COUNT_OBJECTS, NUMWORDS, ladder, dprog, levelCap, progress: () => progress, startSession, nextBlock, runTrial, jumpTo, stepCategory, openSwitch };
 })();
 </script>
 </body>

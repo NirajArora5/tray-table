@@ -27,6 +27,9 @@ Every clean find (first tap, no hint) gets a cheer. Cheers rotate through twelve
 - **Mini parade**: every third clean find in a row. The last three march past and are named. 2.4 s.
 The all-done screen lists everything found cleanly today ("Today you met…"), across sessions, so you can celebrate it together; it resets at midnight. The grown-up panel counts new finds and parades per session.
 
+## Family photos
+In the grown-up panel, behind a parental gate (a sum to type; it locks again when the panel closes), Add photos opens the device's photo picker. Each photo gets a name ("Grandma", "Daddy", "our dog"); once two have names, Family appears as a category and plays through the same Find-it ladder ("Find Grandma!", "Where's our dog?"). Photos are shrunk to 640 px and kept on the device only, in IndexedDB on the web and in the app's private data directory inside the shells; removing one also removes its progress and recordings. The names have no bundled clips, so the booth lists each one to record; the device voice fills in until then.
+
 ## Your voice
 The grown-up panel has a recording booth for the 41 core phrases: prompts, the twelve cheers, the numbers one to ten, the wiggle moves, and the child's name. Tap the dot, say it, tap again (four seconds at most); the take is trimmed of silence, levelled and kept as a small WAV on the device only, in IndexedDB on the web and in the app's private data directory inside the iOS and Android shells. Whatever is recorded plays instead of the bundled clip; everything else keeps the bundled voice. "Bundled voice" switches your recordings off without deleting them. With the child's name recorded, one cheer per cycle becomes "Maya! You found it!". Recording needs the microphone (Safari on iOS 14.3 or newer, or the installed app); nothing is uploaded anywhere.
 

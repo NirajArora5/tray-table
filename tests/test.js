@@ -187,7 +187,7 @@ const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if
     const first = TT.S.dom;
     d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     check(TT.S.paused && !d.querySelector('#screen-switch').classList.contains('hidden'), 'Esc opens the jump sheet and pauses');
-    check(d.querySelectorAll('#switch .jump').length === Object.keys(TT.DOMAINS).length + 2, 'sheet lists every category plus wiggle and calm');
+    check(d.querySelectorAll('#switch .jump').length === TT.DOMS().length + 2, 'sheet lists every available category plus wiggle and calm');
     d.querySelector('#switch [data-act="jump"][data-v="counting"]').click(); await sleep(10);
     check(!TT.S.paused && TT.S.dom === 'counting' && TT.S.trial && TT.S.trial.mode === 'count' && !d.querySelector('#screen-play').classList.contains('hidden'), 'tapping Counting jumps straight into a counting round');
     d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'n', bubbles: true })); await sleep(10);
