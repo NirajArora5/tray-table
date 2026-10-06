@@ -27,6 +27,9 @@ Every clean find (first tap, no hint) gets a cheer. Cheers rotate through twelve
 - **Mini parade**: every third clean find in a row. The last three march past and are named. 2.4 s.
 The all-done screen lists everything found cleanly today ("Today you met…"), across sessions, so you can celebrate it together; it resets at midnight. The grown-up panel counts new finds and parades per session.
 
+## Your voice
+The grown-up panel has a recording booth for the 41 core phrases: prompts, the twelve cheers, the numbers one to ten, the wiggle moves, and the child's name. Tap the dot, say it, tap again (four seconds at most); the take is trimmed of silence, levelled and kept as a small WAV on the device only, in IndexedDB on the web and in the app's private data directory inside the iOS and Android shells. Whatever is recorded plays instead of the bundled clip; everything else keeps the bundled voice. "Bundled voice" switches your recordings off without deleting them. With the child's name recorded, one cheer per cycle becomes "Maya! You found it!". Recording needs the microphone (Safari on iOS 14.3 or newer, or the installed app); nothing is uploaded anywhere.
+
 ## Voice pack
 `tools/voice/` regenerates the recorded voice with a different Piper voice (see the docstring in `pack.py`). It takes about three minutes on a laptop. After adding a phrase to the game, add it to `phrases.js`, then `node phrases.js && python3 pack.py en-us-ryan-high --only-missing` synthesizes just the new clips and keeps the rest byte-for-byte. The macOS piper-tts wheels (1.3 to 1.8) ship with a broken espeak data path; run it on Linux, for example `docker run --rm -v "$PWD":/app -v "$PWD/tools/voice":/voice -w /voice python:3.11-slim bash -c "apt-get update -qq && apt-get install -y -qq ffmpeg && pip install -q piper-tts && python /app/tools/voice/pack.py en-us-ryan-high --only-missing"` with the `.onnx` voice files in `tools/voice/`.
 

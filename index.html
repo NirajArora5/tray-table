@@ -87,6 +87,10 @@ body{height:100%;margin:0;background:var(--bg);color:var(--fg);
 #celebrate .big{animation:pop .6s ease}
 #celebrate .label{font-size:min(6vh,9vw);font-weight:800;margin-top:10px;text-transform:capitalize}
 #celebrate i{position:absolute;left:50%;top:50%;width:14px;height:10px;border-radius:3px;animation:confetti .95s ease-out forwards}
+.booth{display:flex;flex-direction:column;gap:6px;max-height:42vh;overflow:auto;padding-right:4px}
+.booth .ph{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:12px;background:var(--card)}
+.booth .ph b{flex:1;font-weight:600;font-size:15px}.booth .ph.on b{color:#19b38a}.booth .ph.live{outline:2px solid var(--danger)}
+.btn.mini{padding:8px 12px;font-size:15px;border-radius:10px}
 #celebrate .badge{font-size:min(5vh,8vw);font-weight:900;color:#fff;background:#ff5a7a;border-radius:999px;padding:.15em .7em;margin-bottom:6px;animation:pop .5s ease}
 #celebrate .parade{display:flex;gap:min(3vh,4vw);align-items:center}
 #celebrate .parade .item{font-size:min(30vh,26vw);animation:march .9s cubic-bezier(.2,.8,.3,1) both}
@@ -245,6 +249,8 @@ const CFG = {
   CELEBRATE_NEW_MS: 2200,   // first clean find of something, ever: a "New!" badge
   CELEBRATE_PARADE_MS: 2400, // every third clean find in a row: the last three march past (every tier stays under 2.5 s)
   PARADE_EVERY: 3,
+  KID_NAME_MS: 600,       // extra time when a cheer starts with the child's recorded name (normal tier only, stays under 2.5 s)
+  REC_MAX_MS: 4000,       // a booth recording stops by itself after this
   IDLE_MS: 12000,         // no tap → re-prompt
   POKE_MS: 18000,         // still nothing → short explore burst
   POKE_LEN_MS: 20000,
@@ -343,7 +349,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
-const settings = Object.assign({ minutes: 10, sound: true, domains: ['animals', 'vehicles', 'food'], voiceURI: '', rate: 0.85, voiceMode: 'recorded' }, store.get('tt.settings', {}));
+const settings = Object.assign({ minutes: 10, sound: true, domains: ['animals', 'vehicles', 'food'], voiceURI: '', rate: 0.85, voiceMode: 'recorded', ownVoice: true, kidName: '' }, store.get('tt.settings', {}));
 settings.domains = (settings.domains || []).filter(d => RAW[d]);
 if (!settings.v || settings.v < 2) { if (!settings.domains.includes('counting')) settings.domains.push('counting'); settings.v = 2; }
 let progress = store.get('tt.progress', null);
@@ -362,7 +368,7 @@ const S = {
   running: false, paused: false, start: 0, endAt: 0, pauseAt: 0, pausedTotal: 0,
   block: 0, order: [], dom: null, blockEndsAt: 0, justBroke: false,
   phase: 'off', trial: null, explore: null, missStreak: 0, support: 0, stats: null, tapTimes: [],
-  cheerIdx: 0, cleanStreak: 0, recentClean: [], lastTier: 'normal',
+  cheerIdx: 0, cleanStreak: 0, recentClean: [], lastTier: 'normal', rec: null, recErr: '', confirmClear: false,
   idleT: null, idle2T: null, celebT: null, exploreT: null, reshuffleT: null, breakStep: null, confirmReset: false
 };
 const freshStats = () => ({ trials: 0, firstOk: 0, support: 0, hints: 0, pokes: 0, spam: 0, exploreTaps: 0, reprompts: 0, news: 0, parades: 0 });
@@ -546,28 +552,71 @@ if (TTS.ok) {
 // decoded on first use and sequenced through Web Audio. Anything without a clip falls back to the device voice.
 const CLIPS_TEXT = { 'tap-tap': 'Tap, tap!', 'what-do-you-see': 'What do you see?', 'touch-one': 'Touch one!' };
 const CLIPS = (() => { try { return JSON.parse(document.getElementById('clips').textContent); } catch (e) { return {}; } })();
+// ---- Your voice: the grown-up's own recordings of the core phrases ----
+// Stored on this device only: IndexedDB on the web, the app's private Data directory inside the native shells.
+// When a recording exists for a clip id (and "Use my voice" is on) it plays instead of the bundled clip.
+const b64ToBuf = b64 => { const bin = atob(b64), arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); return arr.buffer; };
+const blobToBuf = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsArrayBuffer(blob); });
+const blobToB64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
+const OWN = {
+  ids: new Set(), blobs: {}, ready: null, DIR: 'voice',
+  fs() { const C = window.Capacitor; return NATIVE && C && C.Plugins && C.Plugins.Filesystem ? C.Plugins.Filesystem : null; },
+  file(id) { return this.DIR + '/' + encodeURIComponent(id) + '.wav'; },
+  db() { return new Promise((res, rej) => { try { const r = indexedDB.open('tt-voice', 1); r.onupgradeneeded = () => r.result.createObjectStore('clips'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }); },
+  idb(mode, fn) { return this.db().then(db => new Promise((res, rej) => { const tx = db.transaction('clips', mode); const r = fn(tx.objectStore('clips')); tx.oncomplete = () => { db.close(); res(r && r.result); }; tx.onerror = () => { db.close(); rej(tx.error); }; })); },
+  load() {
+    if (!this.ready) this.ready = (this.fs()
+      ? this.fs().readdir({ path: this.DIR, directory: 'DATA' }).then(r => (r.files || []).map(f => decodeURIComponent((f.name || f).replace(/\.wav$/, ''))))
+      : this.idb('readonly', st => st.getAllKeys())
+    ).then(ids => { this.ids = new Set(ids || []); }).catch(() => { this.ids = new Set(); });
+    return this.ready;
+  },
+  has(id) { return this.ids.has(id); },
+  count() { return this.ids.size; },
+  get(id) {
+    if (!this.has(id)) return Promise.resolve(null);
+    if (this.blobs[id]) return Promise.resolve(this.blobs[id]);
+    const p = this.fs()
+      ? this.fs().readFile({ path: this.file(id), directory: 'DATA' }).then(r => new Blob([b64ToBuf(r.data)], { type: 'audio/wav' }))
+      : this.idb('readonly', st => st.get(id));
+    return p.then(b => { if (b) this.blobs[id] = b; return b || null; }).catch(() => null);
+  },
+  put(id, blob) {
+    const p = this.fs()
+      ? blobToB64(blob).then(data => this.fs().writeFile({ path: this.file(id), directory: 'DATA', data, recursive: true }))
+      : this.idb('readwrite', st => st.put(blob, id));
+    return p.then(() => { this.ids.add(id); this.blobs[id] = blob; AUDIO.forget(id); });
+  },
+  remove(id) {
+    const p = this.fs() ? this.fs().deleteFile({ path: this.file(id), directory: 'DATA' }) : this.idb('readwrite', st => st.delete(id));
+    return p.catch(() => {}).then(() => { this.ids.delete(id); delete this.blobs[id]; AUDIO.forget(id); });
+  },
+  clear() { return Promise.all([...this.ids].map(id => this.remove(id))); }
+};
 const AUDIO = {
   bufs: {}, pending: {}, playing: null, seq: 0,
   ctx() { SFX.init(); return SFX.ctx; },
-  has(ids) { return !!ids && ids.length > 0 && ids.every(id => !!CLIPS[id]); },
-  buf(id) {
-    if (this.bufs[id]) return Promise.resolve(this.bufs[id]);
-    if (!CLIPS[id]) return Promise.resolve(null);
-    if (!this.pending[id]) this.pending[id] = new Promise(res => {
-      try {
-        const bin = atob(CLIPS[id]), arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-        const ctx = this.ctx(); if (!ctx) return res(null);
-        const ok = b => { this.bufs[id] = b; res(b); }, bad = () => res(null);
-        const r = ctx.decodeAudioData(arr.buffer, ok, bad); if (r && r.then) r.then(ok, bad);
-      } catch (e) { res(null); }
-    });
-    return this.pending[id];
+  own(id) { return settings.ownVoice !== false && OWN.has(id); },
+  has(ids) { return !!ids && ids.length > 0 && ids.every(id => !!CLIPS[id] || this.own(id)); },
+  // own === true forces the recording (the booth's play button); otherwise a recording wins when "Use my voice" is on
+  buf(id, own) {
+    const fromOwn = own === true ? OWN.has(id) : this.own(id), k = fromOwn ? 'own:' + id : id;
+    if (this.bufs[k]) return Promise.resolve(this.bufs[k]);
+    if (!fromOwn && !CLIPS[id]) return Promise.resolve(null);
+    if (!this.pending[k]) this.pending[k] = (fromOwn ? OWN.get(id).then(b => b ? blobToBuf(b) : null) : Promise.resolve(b64ToBuf(CLIPS[id])))
+      .then(ab => new Promise(res => {
+        const ctx = this.ctx(); if (!ab || !ctx) return res(null);
+        const ok = b => { this.bufs[k] = b; res(b); }, bad = () => res(null);
+        try { const r = ctx.decodeAudioData(ab, ok, bad); if (r && r.then) r.then(ok, bad); } catch (e) { res(null); }
+      })).catch(() => null);
+    return this.pending[k];
   },
-  warm(ids) { ids.forEach(id => { if (CLIPS[id]) this.buf(id); }); },
-  play(ids) {
+  forget(id) { delete this.bufs['own:' + id]; delete this.pending['own:' + id]; },
+  warm(ids) { ids.forEach(id => { if (CLIPS[id] || this.own(id)) this.buf(id); }); },
+  play(ids, own) {
     const ctx = this.ctx(); if (!ctx) return Promise.resolve(false);
     SFX.resume(); this.stop(); const my = ++this.seq;
-    return Promise.all(ids.map(id => this.buf(id))).then(bufs => {
+    return Promise.all(ids.map(id => this.buf(id, own))).then(bufs => {
       if (my !== this.seq) return true;
       if (bufs.some(b => !b)) return false;
       let t = ctx.currentTime + 0.02; this.playing = [];
@@ -592,6 +641,65 @@ const VOICE = {
 // iPad/iPhone mute switch: Web Audio is silenced by it unless a media element is playing, so a looping silent track keeps
 // the voice audible with the switch on (the parent still has the in-game Sound setting to go silent on purpose).
 const UNMUTE = { el: null, start() { try { if (!this.el) { this.el = new Audio('data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//NwwAAAAAAAAAAAAEluZm8AAAAPAAAADgAAAiQAYWFhYWFhYW1tbW1tbW15eXl5eXl5hoaGhoaGhpKSkpKSkpKenp6enp6eqqqqqqqqqra2tra2tra2wsLCwsLCws/Pz8/Pz8/b29vb29vb5+fn5+fn5/Pz8/Pz8/P/////////AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQDaQAAAAAAAAIkB3uyowAAAAAAAAAAAAAAAAD/8xDEAAAAA0gAAAAATEFNRTMuMTAwVVVVVf/zEsQNAAADSAAAAABVVVVVVVVVVVVVVVVVVf/zEMQbAAADSAAAAABVVVVVVVVVVVVVVVVV//MQxCgAAANIAAAAAFVVVVVVVVVVVVVVVVX/8xDENQAAA0gAAAAAVVVVVVVVVVVVVVVVVf/zEMRCAAADSAAAAABVVVVVVVVVVVVVVVVV//MQxE8AAANIAAAAAFVVVVVVVVVVVVVVVVX/8xDEXAAAA0gAAAAAVVVVVVVVVVVVVVVVVf/zEMRpAAADSAAAAABVVVVVVVVVVVVVVVVV//MSxHYAAANIAAAAAFVVVVVVVVVVVVVVVVVV//MQxIQAAANIAAAAAFVVVVVVVVVVVVVVVVX/8xDEkQAAA0gAAAAAVVVVVVVVVVVVVVVVVf/zEMSeAAADSAAAAABVVVVVVVVVVVVVVVVV//MQxKsAAANIAAAAAFVVVVVVVVVVVVVVVVU='); this.el.loop = true; this.el.volume = 0.01; } this.el.play().catch(() => {}); } catch (e) {} } };
+
+// The booth: getUserMedia + MediaRecorder, then the take is decoded, trimmed of silence, levelled and stored as 16-bit WAV.
+const REC = {
+  rec: null, stream: null, chunks: [], done: null, stopT: null,
+  ok() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); },
+  start() {
+    return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }).then(stream => {
+      const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'].find(t => { try { return MediaRecorder.isTypeSupported(t); } catch (e) { return false; } });
+      const rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+      this.rec = rec; this.stream = stream; this.chunks = [];
+      rec.ondataavailable = e => { if (e.data && e.data.size) this.chunks.push(e.data); };
+      this.done = new Promise(res => { rec.onstop = () => res(); });
+      rec.start();
+      this.stopT = setTimeout(() => { if (this.rec === rec) this.stop(); }, CFG.REC_MAX_MS);
+    });
+  },
+  stop() {   // resolves to a WAV blob, or null when nothing but silence came in
+    const rec = this.rec; if (!rec) return Promise.resolve(null);
+    clearTimeout(this.stopT); this.rec = null;
+    if (rec.state !== 'inactive') rec.stop();
+    return this.done.then(() => {
+      try { this.stream.getTracks().forEach(t => t.stop()); } catch (e) {} this.stream = null;
+      const raw = new Blob(this.chunks, { type: rec.mimeType || 'audio/webm' }); this.chunks = [];
+      const ctx = AUDIO.ctx(); if (!ctx || !raw.size) return null;
+      return blobToBuf(raw).then(ab => new Promise((res, rej) => { const r = ctx.decodeAudioData(ab, res, rej); if (r && r.then) r.then(res, rej); }))
+        .then(buf => { const s = this.trim(buf.getChannelData(0), buf.sampleRate); return s.length ? this.wav(s, buf.sampleRate) : null; });
+    });
+  },
+  trim(s, rate, thr, padMs) {   // cut leading/trailing silence, keep a short pad, level the peak to 0.8
+    thr = thr || 0.02; padMs = padMs || 60;
+    let a = 0, b = s.length - 1;
+    while (a < s.length && Math.abs(s[a]) < thr) a++;
+    while (b > a && Math.abs(s[b]) < thr) b--;
+    if (a >= b) return new Float32Array(0);
+    const pad = Math.round(rate * padMs / 1000); a = Math.max(0, a - pad); b = Math.min(s.length - 1, b + pad);
+    const out = Float32Array.from(s.subarray(a, b + 1));
+    let peak = 0; for (let i = 0; i < out.length; i++) peak = Math.max(peak, Math.abs(out[i]));
+    if (peak > 0) { const g = Math.min(4, 0.8 / peak); for (let i = 0; i < out.length; i++) out[i] *= g; }
+    return out;
+  },
+  wav(s, rate) {   // 16-bit mono PCM
+    const n = s.length, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+    const str = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+    str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) { const x = Math.max(-1, Math.min(1, s[i])); v.setInt16(44 + i * 2, x < 0 ? x * 32768 : x * 32767, true); }
+    return new Blob([b], { type: 'audio/wav' });
+  }
+};
+// The core phrases worth recording: prompts, cheers, numbers, wiggles and the child's name (used in cheers).
+function ownPhrases() {
+  const P = [['lets-play', "Let's play!"], ['tap-tap', 'Tap, tap!'], ['what-do-you-see', 'What do you see?'], ['touch-one', 'Touch one!'], ['here', 'Here!'],
+    ['lets-count-to', "Let's count to"], ['you-found-the', 'You found the'], ['new', 'New!'], ['calm', 'Nice and slow. Pop the bubbles.'], ['all-done', 'All done! Great job!']];
+  CHEERS.forEach((c, i) => P.push(['cheer:' + i, c]));
+  NUMWORDS.slice(1).forEach(w => P.push(['name:counting:' + w, cap1(w) + '.']));
+  WIGGLES.forEach(([e, t], i) => P.push(['wiggle:' + i, t]));
+  P.push(['kid-name', settings.kidName ? settings.kidName + '!' : "Your child's name"]);
+  return P.map(([id, text]) => ({ id, text }));
+}
 
 /* ================= RUNTIME ================= */
 function startSession() {
@@ -793,11 +901,11 @@ function onPadTap() {
     const steady = tr.gaps.length ? tr.gaps.filter(g => g >= CFG.COUNT_GAP_MIN_MS && g <= CFG.COUNT_GAP_MAX_MS).length / tr.gaps.length : 1;
     finishTrial(!tr.nudged && steady >= CFG.COUNT_STEADY, now() - tr.startedAt);
     if (S.lastTier === 'parade') return celebrateParade(runTrial);
-    const word = tr.target.name, things = tr.target.val === 1 ? tr.obj[0] : tr.obj[2], c = nextCheer(null), isNew = S.lastTier === 'new';
+    const word = tr.target.name, things = tr.target.val === 1 ? tr.obj[0] : tr.obj[2], isNew = S.lastTier === 'new', c = nextCheer(null, !isNew);
     celebrateHTML(`<span class="item num"><span class="numeral">${tr.target.val}</span></span><div class="celebrate-row">${tr.obj[1].repeat(tr.target.val)}</div>`,
       word, `${isNew ? 'New! ' : ''}${c.text} ${cap1(word)}. ${cap1(word)} ${things}.`,
       [...(isNew ? ['new'] : []), ...c.clips, 'name:' + tr.target.id, 'name:' + tr.target.id, (tr.target.val === 1 ? 'one:' : 'many:') + tr.obj[0]], runTrial,
-      isNew ? { badge: 'New!', ms: CFG.CELEBRATE_NEW_MS } : null);
+      isNew ? { badge: 'New!', ms: CFG.CELEBRATE_NEW_MS } : { ms: CFG.CELEBRATE_MS + (c.kid ? CFG.KID_NAME_MS : 0) });
   } else armIdle();
 }
 function onChoice(i, card) {
@@ -845,19 +953,22 @@ function showHint(tr) {
 }
 // The next cheer in rotation. Once per cycle, when there is a thing to name, it is the composed "You found the ___!"
 // (two clips: 'you-found-the' + the thing's name), which then stands in for the name in the celebration line.
-function nextCheer(it) {
-  const i = S.cheerIdx++ % (CHEERS.length + 1);
+// With the child's name recorded in the booth, one more slot per cycle opens with it: "Maya! You found it!" (allowKid: only
+// where the extra KID_NAME_MS fits, i.e. the normal tier).
+function nextCheer(it, allowKid) {
+  const kid = !!allowKid && AUDIO.own('kid-name');
+  const i = S.cheerIdx++ % (CHEERS.length + 1 + (kid ? 1 : 0));
+  if (i === CHEERS.length + 1) return { text: `${settings.kidName ? settings.kidName + '! ' : ''}You found it!`, clips: ['kid-name', 'cheer:1'], composed: false, kid: true };
   if (i === CHEERS.length && it) return { text: `You found the ${it.label}!`, clips: ['you-found-the', 'name:' + it.id], composed: true };
   const j = i === CHEERS.length ? 0 : i;
   return { text: CHEERS[j], clips: ['cheer:' + j], composed: false };
 }
 function celebrate(it, then) {
   if (S.lastTier === 'parade') return celebrateParade(then);
-  const c = nextCheer(it), sayClip = CLIPS['say:' + it.id] ? ['say:' + it.id] : [];
+  const isNew = S.lastTier === 'new', c = nextCheer(it, !isNew), sayClip = CLIPS['say:' + it.id] ? ['say:' + it.id] : [];
   const nameBit = c.composed ? '' : ` ${cap1(it.name)}.`, nameClip = c.composed ? [] : ['name:' + it.id];
-  const isNew = S.lastTier === 'new';
   celebrateHTML(renderItem(it), it.name, `${isNew ? 'New! ' : ''}${c.text}${nameBit} ${it.say}`,
-    [...(isNew ? ['new'] : []), ...c.clips, ...nameClip, ...sayClip], then, isNew ? { badge: 'New!', ms: CFG.CELEBRATE_NEW_MS } : null);
+    [...(isNew ? ['new'] : []), ...c.clips, ...nameClip, ...sayClip], then, isNew ? { badge: 'New!', ms: CFG.CELEBRATE_NEW_MS } : { ms: CFG.CELEBRATE_MS + (c.kid ? CFG.KID_NAME_MS : 0) });
 }
 // Mini parade: the last PARADE_EVERY clean finds march past, named in order. Cheer + three names fits in the window.
 function celebrateParade(then) {
@@ -1023,6 +1134,7 @@ function renderPanel() {
     : `<p class="note" style="margin:0">No speech voices found on this device yet.</p>`)
     + `<div class="row" style="margin-top:10px"><div class="seg"><button data-act="rate" data-v="0.72" class="${settings.rate <= 0.75 ? 'on' : ''}">Slow and clear</button><button data-act="rate" data-v="0.85" class="${settings.rate > 0.75 ? 'on' : ''}">Normal</button></div><button class="btn" data-act="testvoice">Hear it</button></div>
     <p class="note">The voice that ships with an iPad is the compact one, which is why it sounds flat. Better ones are a free download: Settings, Accessibility, Spoken Content, Voices, English, then open Samantha or Ava and download the Enhanced or Premium version. It then shows up in this list with that label, and works offline.</p></div>`;
+  h += boothHTML();
   h += `<div><h2>Categories</h2><div class="row">${Object.keys(DOMAINS).map(d =>
     `<button class="chip ${settings.domains.includes(d) ? 'on' : ''}" data-act="dom" data-v="${d}">${DOMAINS[d].name}<span class="lvl">${ladder(d)[dprog(d).level].name}</span></button>`).join('')}</div></div>`;
   const shown = Object.keys(DOMAINS).filter(d => settings.domains.includes(d) || dprog(d).hist.length || dprog(d).level > 0);
@@ -1031,6 +1143,25 @@ function renderPanel() {
   h += `<div class="tips">During play, hold the top-right corner for a moment (or press <code>Esc</code>) for the jump sheet: switch category, wiggle break, calm bubbles, end early, or come back here. A two-finger swipe left or right jumps categories without the sheet. On a keyboard, <code>←</code> <code>↑</code> <code>↓</code> <code>→</code> or <code>1</code> to <code>4</code> pick a card, <code>Space</code> repeats the prompt, <code>N</code> and <code>P</code> jump categories. On iPad, turn on Guided Access (Settings, Accessibility) and triple-click to lock the kid in.</div>`;
   $('#panel').innerHTML = h;
   offlineStatus().then(msg => { const n = $('#offline-note'); if (n) n.textContent = msg; });
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function boothHTML() {
+  const P = ownPhrases(), n = P.filter(p => OWN.has(p.id)).length;
+  let h = `<div id="booth"><h2>Your voice</h2><p class="note" style="margin:0 0 8px">Record the ${P.length} core phrases in your own voice. They stay on this device and play instead of the bundled clips. Hold the device close, tap the dot, say it, tap again. Up to four seconds each.</p>`;
+  if (!REC.ok()) h += `<p class="note" style="margin:0 0 8px">This browser can't record. The installed app, or Safari on iOS 14.3 and newer, can.</p>`;
+  h += `<div class="row" style="margin-bottom:8px"><div class="seg"><button data-act="own" data-v="1" class="${settings.ownVoice !== false ? 'on' : ''}">Use my voice</button><button data-act="own" data-v="0" class="${settings.ownVoice === false ? 'on' : ''}">Bundled voice</button></div><span class="note" style="margin:0" id="booth-count">${n} of ${P.length} recorded</span></div>`;
+  h += `<label class="note" style="display:block;margin:0 0 8px">Child's name, for the cheers <input class="select" style="width:10em" data-act="kidname" value="${esc(settings.kidName || '')}" maxlength="24" placeholder="Maya"></label>`;
+  if (S.recErr) h += `<p class="note" style="margin:0 0 8px;color:var(--danger)">${esc(S.recErr)}</p>`;
+  h += `<div class="booth">` + P.map(p => { const on = OWN.has(p.id), live = S.rec === p.id;
+    return `<div class="ph${on ? ' on' : ''}${live ? ' live' : ''}" data-id="${p.id}"><b>${esc(p.text)}</b>${on ? `<button class="btn mini" data-act="recplay" data-v="${p.id}" aria-label="Play">▶</button>` : ''}<button class="btn mini${live ? ' danger' : ''}" data-act="rec" data-v="${p.id}">${live ? '■ Stop' : on ? '● Again' : '● Record'}</button>${on && !live ? `<button class="btn mini" data-act="recdel" data-v="${p.id}" aria-label="Delete">✕</button>` : ''}</div>`; }).join('') + `</div>`;
+  if (n) h += `<div class="row" style="margin-top:8px"><button class="btn danger" data-act="recclear">${S.confirmClear ? 'Tap again to delete every recording' : 'Delete all recordings'}</button></div>`;
+  return h + `</div>`;
+}
+function boothRecord(id) {
+  SFX.init(); SFX.resume(); S.recErr = '';
+  const finish = () => REC.stop().then(blob => blob ? OWN.put(S.rec, blob) : null).then(() => { S.rec = null; });
+  const p = S.rec === id ? finish() : (S.rec ? finish() : Promise.resolve()).then(() => REC.start()).then(() => { S.rec = id; });
+  return p.catch(e => { S.rec = null; S.recErr = 'Microphone not available. Allow the microphone for this app and try again.'; }).then(renderPanel);
 }
 function offlineStatus() {
   if (NATIVE) return Promise.resolve('✓ Installed app. Works in airplane mode.');
@@ -1056,6 +1187,14 @@ $('#panel').addEventListener('click', e => {
   if (act === 'sound') settings.sound = v === '1';
   if (act === 'rate') settings.rate = +v;
   if (act === 'vmode') settings.voiceMode = v;
+  if (act === 'own') settings.ownVoice = v === '1';
+  if (act === 'rec') return boothRecord(v);
+  if (act === 'recplay') { SFX.init(); SFX.resume(); UNMUTE.start(); AUDIO.play([v], true); return; }
+  if (act === 'recdel') return OWN.remove(v).then(renderPanel);
+  if (act === 'recclear') {
+    if (S.confirmClear) { S.confirmClear = false; return OWN.clear().then(renderPanel); }
+    S.confirmClear = true; setTimeout(() => { S.confirmClear = false; if (!$('#screen-parent').classList.contains('hidden')) renderPanel(); }, 3000);
+  }
   if (act === 'testvoice') { SFX.init(); SFX.resume(); UNMUTE.start(); VOICE.say("Where's the cow? Cow. Moo! Let's count to three. One, two, three.", 'replace', ['where:animals:cow', 'name:animals:cow', 'say:animals:cow', 'lets-count-to', 'name:counting:three', 'name:counting:one', 'name:counting:two', 'name:counting:three'], true); return; }
   if (act === 'dom') { const i = settings.domains.indexOf(v); if (i >= 0) settings.domains.splice(i, 1); else settings.domains.push(v); if (S.running) S.order = shuffle(settings.domains); }
   if (act === 'lvl') { const d = b.dataset.d, p = dprog(d), lv = Math.min(+v, levelCap(d)); p.level = lv; p.hist = p.hist.filter(h => h.level !== lv); if (lv > 0) p.explore = { on: 0, all: 0 }; }
@@ -1066,6 +1205,8 @@ $('#panel').addEventListener('click', e => {
   save(); renderPanel();
 });
 $('#panel').addEventListener('change', e => {
+  const kid = e.target.closest('input[data-act="kidname"]');
+  if (kid) { settings.kidName = kid.value.trim().slice(0, 24); save(); renderPanel(); return; }
   const sel = e.target.closest('select[data-act="voice"]'); if (!sel) return;
   settings.voiceURI = sel.value; TTS.pick(); save();
   SFX.init(); SFX.resume(); TTS.say("Hi! Let's play.", 'replace', true);
@@ -1140,6 +1281,7 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 
 /* ---- boot ---- */
 renderPanel(); show('parent'); setBg(null);
+OWN.load().then(() => { if (!$('#screen-parent').classList.contains('hidden')) renderPanel(); });
 if (location.protocol === 'https:' && !NATIVE && !/claude|anthropic/i.test(location.hostname)) {   // self-hosted web: real offline install (the native shells skip this)
   try {
     const m = document.createElement('link'); m.rel = 'manifest'; m.href = './manifest.webmanifest'; document.head.appendChild(m);
@@ -1147,7 +1289,7 @@ if (location.protocol === 'https:' && !NATIVE && !/claude|anthropic/i.test(locat
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   } catch (e) {}
 }
-window.TT = { S, CFG, settings, LEVELS, DOMAINS, ITEMS, TTS, CHEERS, metToday, nextCheer, WIGGLES, COUNT_OBJECTS, NUMWORDS, ladder, dprog, levelCap, progress: () => progress, startSession, nextBlock, runTrial, jumpTo, stepCategory, openSwitch };
+window.TT = { S, CFG, settings, LEVELS, DOMAINS, ITEMS, TTS, CHEERS, metToday, nextCheer, OWN, AUDIO, REC, ownPhrases, renderPanel, WIGGLES, COUNT_OBJECTS, NUMWORDS, ladder, dprog, levelCap, progress: () => progress, startSession, nextBlock, runTrial, jumpTo, stepCategory, openSwitch };
 })();
 </script>
 </body>

@@ -36,7 +36,9 @@ check(!/NSAppTransportSecurity|NSAllowsArbitraryLoads/.test(plist), 'no ATS exce
 
 /* ---- Android ---- */
 const am = read('android/app/src/main/AndroidManifest.xml');
-check(!/uses-permission/.test(am), 'Android manifest requests no permissions at all');
+const perms = [...am.matchAll(/uses-permission android:name="([^"]+)"/g)].map(m => m[1]).sort();
+check(perms.join() === 'android.permission.MODIFY_AUDIO_SETTINGS,android.permission.RECORD_AUDIO', 'Android manifest requests only the microphone (no INTERNET): ' + perms.join(' '));
+check(/NSMicrophoneUsageDescription/.test(plist) && /Recordings stay on this device/.test(plist), 'iOS explains the microphone and that recordings stay on the device');
 check(/android:allowBackup="false"/.test(am), 'Android auto backup off: progress and recordings stay on the device');
 check(!/android:screenOrientation=/.test(am), 'Android activity leaves orientation unrestricted');
 check(/<string name="app_name">Toddler Time<\/string>/.test(read('android/app/src/main/res/values/strings.xml')), 'Android app name');
