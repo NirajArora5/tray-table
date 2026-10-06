@@ -27,6 +27,9 @@ Every clean find (first tap, no hint) gets a cheer. Cheers rotate through twelve
 - **Mini parade**: every third clean find in a row. The last three march past and are named. 2.4 s.
 The all-done screen lists everything found cleanly today ("Today you met…"), across sessions, so you can celebrate it together; it resets at midnight. The grown-up panel counts new finds and parades per session.
 
+## Co-play and minutes today
+Settings → Sound has three choices. **On** is the normal game. **Off, silent mode** swaps spoken prompts for a quick peek at the target. **Co-play, I read it** is silent too, but every line the game would say appears as text at the top of the screen (and on the celebration) for you to read aloud, and the target stays hidden so your child answers you. The grown-up panel's "Played today" line adds up play time across sessions (pauses excluded) with the number of sessions and things met; it resets at midnight.
+
 ## Family photos
 In the grown-up panel, behind a parental gate (a sum to type; it locks again when the panel closes), Add photos opens the device's photo picker. Each photo gets a name ("Grandma", "Daddy", "our dog"); once two have names, Family appears as a category and plays through the same Find-it ladder ("Find Grandma!", "Where's our dog?"). Photos are shrunk to 640 px and kept on the device only, in IndexedDB on the web and in the app's private data directory inside the shells; removing one also removes its progress and recordings. The names have no bundled clips, so the booth lists each one to record; the device voice fills in until then.
 
