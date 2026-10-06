@@ -5,6 +5,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 function boot() {
   const spoken = [];
   const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://localhost/', beforeParse(w) {
+    w.HTMLMediaElement.prototype.play = () => Promise.resolve(); w.HTMLMediaElement.prototype.pause = () => {};   // jsdom has no media playback; the silent unmute loop would otherwise log a stack trace per session
     w.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
     w.speechSynthesis = { cancel() {}, getVoices() { return [{ name: 'Samantha', lang: 'en-US', voiceURI: 'com.apple.voice.compact.en-US.Samantha', localService: true }, { name: 'Ava', lang: 'en-US', voiceURI: 'com.apple.voice.premium.en-US.Ava', localService: true }, { name: 'Google US English', lang: 'en-US', voiceURI: 'Google US English', localService: false }]; },
       speak(u) { spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 40); } };

@@ -7,6 +7,7 @@ const sc = ms => Math.max(5, Math.round(ms / SCALE));
 
 function boot() {
   const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://localhost/', beforeParse(w) {
+    w.HTMLMediaElement.prototype.play = () => Promise.resolve(); w.HTMLMediaElement.prototype.pause = () => {};   // jsdom has no media playback; the silent unmute loop would otherwise log a stack trace per session
     w.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
     w.speechSynthesis = { cancel() {}, getVoices() { return []; }, speak(u) { setTimeout(() => u.onend && u.onend(), 5); } };
   } });
