@@ -22,7 +22,7 @@ const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if
   /* ---- Test 1: engine paths ---- */
   {
     const { w, d, tap, TT } = boot();
-    Object.assign(TT.CFG, { BLOCK_MS: 600000, CALM_MS: 1000, MIN_BLOCK_MS: 100, PEEK_MS: 20, CELEBRATE_MS: 20, IDLE_MS: 1e6, POKE_MS: 1e6, RESHUFFLE_MS: 1e6 });
+    Object.assign(TT.CFG, { BLOCK_MS: 600000, CALM_MS: 1000, MIN_BLOCK_MS: 100, PEEK_MS: 20, CELEBRATE_MS: 20, CELEBRATE_NEW_MS: 20, CELEBRATE_PARADE_MS: 20, IDLE_MS: 1e6, POKE_MS: 1e6, RESHUFFLE_MS: 1e6 });
     TT.settings.minutes = 30; TT.settings.domains = ['animals']; TT.settings.sound = true;
     d.querySelector('[data-act="start"]').click();
     await sleep(20);
@@ -97,7 +97,7 @@ const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if
   /* ---- Test 2: full session machine ---- */
   {
     const { w, d, tap, TT } = boot();
-    Object.assign(TT.CFG, { BLOCK_MS: 300, CALM_MS: 400, MIN_BLOCK_MS: 50, BREAK_EVERY: 2, BREAK_STEP_MS: 80, PEEK_MS: 20, CELEBRATE_MS: 20, IDLE_MS: 1e6, POKE_MS: 1e6, RESHUFFLE_MS: 1e6 });
+    Object.assign(TT.CFG, { BLOCK_MS: 300, CALM_MS: 400, MIN_BLOCK_MS: 50, BREAK_EVERY: 2, BREAK_STEP_MS: 80, PEEK_MS: 20, CELEBRATE_MS: 20, CELEBRATE_NEW_MS: 20, CELEBRATE_PARADE_MS: 20, IDLE_MS: 1e6, POKE_MS: 1e6, RESHUFFLE_MS: 1e6 });
     TT.settings.minutes = 0.06; TT.settings.domains = ['animals', 'food']; TT.settings.sound = false;
     const seen = new Set(); const doms = new Set();
     d.querySelector('[data-act="start"]').click();
@@ -114,7 +114,7 @@ const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if
   /* ---- Test 3: silent mode + idle nudge ---- */
   {
     const { w, d, tap, TT } = boot();
-    Object.assign(TT.CFG, { BLOCK_MS: 600000, CALM_MS: 1000, MIN_BLOCK_MS: 100, PEEK_MS: 20, CELEBRATE_MS: 20, IDLE_MS: 60, POKE_MS: 60, POKE_LEN_MS: 150, RESHUFFLE_MS: 1e6 });
+    Object.assign(TT.CFG, { BLOCK_MS: 600000, CALM_MS: 1000, MIN_BLOCK_MS: 100, PEEK_MS: 20, CELEBRATE_MS: 20, CELEBRATE_NEW_MS: 20, CELEBRATE_PARADE_MS: 20, IDLE_MS: 60, POKE_MS: 60, POKE_LEN_MS: 150, RESHUFFLE_MS: 1e6 });
     TT.settings.minutes = 30; TT.settings.domains = ['animals']; TT.settings.sound = false;
     TT.dprog('animals').level = 3;
     d.querySelector('[data-act="start"]').click(); await sleep(10);
@@ -138,7 +138,7 @@ const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if
   /* ---- Test 4: counting mode ---- */
   {
     const { w, d, tap, TT } = boot();
-    Object.assign(TT.CFG, { BLOCK_MS: 600000, CALM_MS: 1000, MIN_BLOCK_MS: 100, CELEBRATE_MS: 20, IDLE_MS: 1e6, POKE_MS: 1e6, RESHUFFLE_MS: 1e6, COUNT_GAP_MIN_MS: 0 });
+    Object.assign(TT.CFG, { BLOCK_MS: 600000, CALM_MS: 1000, MIN_BLOCK_MS: 100, CELEBRATE_MS: 20, CELEBRATE_NEW_MS: 20, CELEBRATE_PARADE_MS: 20, IDLE_MS: 1e6, POKE_MS: 1e6, RESHUFFLE_MS: 1e6, COUNT_GAP_MIN_MS: 0 });
     TT.settings.minutes = 30; TT.settings.domains = ['counting']; TT.settings.sound = true;
     check(TT.settings.domains.includes('counting') && TT.ladder('counting').length === 3, 'counting has its own 3-rung ladder');
     d.querySelector('[data-act="start"]').click(); await sleep(10);
@@ -181,7 +181,7 @@ const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if
   {
     const { w, d, tap, TT } = boot();
     check(TT.TTS.voice && /premium/.test(TT.TTS.voice.voiceURI), 'auto-picks the premium offline voice (' + (TT.TTS.voice && TT.TTS.voice.name) + ')');
-    Object.assign(TT.CFG, { BLOCK_MS: 600000, CALM_MS: 1000, MIN_BLOCK_MS: 100, CELEBRATE_MS: 20, IDLE_MS: 1e6, POKE_MS: 1e6, RESHUFFLE_MS: 1e6, CALM_JUMP_MS: 150, BREAK_STEP_MS: 60, BREAK_EVERY: 100 });
+    Object.assign(TT.CFG, { BLOCK_MS: 600000, CALM_MS: 1000, MIN_BLOCK_MS: 100, CELEBRATE_MS: 20, CELEBRATE_NEW_MS: 20, CELEBRATE_PARADE_MS: 20, IDLE_MS: 1e6, POKE_MS: 1e6, RESHUFFLE_MS: 1e6, CALM_JUMP_MS: 150, BREAK_STEP_MS: 60, BREAK_EVERY: 100 });
     TT.settings.minutes = 30; TT.settings.domains = ['animals', 'counting']; TT.settings.sound = true;
     d.querySelector('[data-act="start"]').click(); await sleep(10);
     const first = TT.S.dom;
@@ -198,7 +198,7 @@ const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if
     const before = w.__spoken.length; const tr = TT.S.trial; const pad = d.querySelector('#choices .pad');
     for (let i = 0; i < tr.target.val; i++) tap(pad);
     const said = w.__spoken.slice(before);
-    check(tr.done && said.length <= 2 && /Hooray|Yes|Wow|found|That's it/.test(said[said.length - 1]) && said[said.length - 1].includes(tr.target.name.charAt(0).toUpperCase() + tr.target.name.slice(1)), `rapid taps collapse to whole words, celebration says the number (${said.length} utterances)`);
+    check(tr.done && said.length <= 2 && new RegExp(TT.CHEERS.map(c => c.replace(/[.*+?^$()|]/g, '\\$&')).concat(['You found the']).join('|')).test(said[said.length - 1]) && said[said.length - 1].includes(tr.target.name.charAt(0).toUpperCase() + tr.target.name.slice(1)), `rapid taps collapse to whole words, celebration says the number (${said.length} utterances)`);
     await sleep(40);
     // jump to a jumped-in category that isn't in rotation adds it
     TT.openSwitch(); d.querySelector('#switch [data-act="jump"][data-v="food"]').click(); await sleep(10);
@@ -221,6 +221,60 @@ const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if
     d.querySelector('#panel [data-act="resume"]').click(); await sleep(10);
     TT.openSwitch(); d.querySelector('#switch [data-act="end"]').click();
     check(TT.S.phase === 'done' && !d.querySelector('#screen-done').classList.contains('hidden'), 'All done now ends the session on the done screen');
+  }
+
+  /* ---- Test 6: celebration tiers, cheer rotation, today's recap ---- */
+  {
+    const { w, d, tap, TT } = boot();
+    check(TT.CFG.CELEBRATE_MS <= 2500 && TT.CFG.CELEBRATE_NEW_MS <= 2500 && TT.CFG.CELEBRATE_PARADE_MS <= 2500, 'every celebration tier is under 2.5 s by default');
+    check(TT.CHEERS.length === 12 && new Set(TT.CHEERS).size === 12, 'twelve distinct cheers');
+    const phrases = JSON.parse(require('fs').readFileSync(__dirname + '/../tools/voice/phrases.json', 'utf8'));
+    const clipIds = JSON.parse(html.match(/<script id="clips" type="application\/json">(.*?)<\/script>/s)[1]);
+    const needed = ['new', 'you-found-the', ...TT.CHEERS.map((c, i) => 'cheer:' + i)];
+    check(needed.every(id => phrases[id]) && needed.every(id => clipIds[id]), 'new cheers and tier words are in phrases.json and recorded in the clip pack');
+    Object.assign(TT.CFG, { BLOCK_MS: 600000, CALM_MS: 1000, MIN_BLOCK_MS: 100, PEEK_MS: 20, CELEBRATE_MS: 20, CELEBRATE_NEW_MS: 30, CELEBRATE_PARADE_MS: 40, IDLE_MS: 1e6, POKE_MS: 1e6, RESHUFFLE_MS: 1e6, REVIEW_P: 0 });
+    TT.settings.minutes = 30; TT.settings.domains = ['animals']; TT.settings.sound = true;
+    TT.dprog('animals').level = 1;
+    d.querySelector('[data-act="start"]').click(); await sleep(10);
+    const right = () => { const tr = TT.S.trial; return [...d.querySelectorAll('#choices .card')].find(c => c.dataset.id === tr.target.id); };
+    const wrong = () => { const tr = TT.S.trial; return [...d.querySelectorAll('#choices .card')].find(c => c.dataset.id !== tr.target.id); };
+    // 1st clean find of anything: "New!"
+    let before = w.__spoken.length; let it = TT.S.trial.target; tap(right());
+    check(TT.S.lastTier === 'new' && d.querySelector('#celebrate .badge') && d.querySelector('#celebrate .badge').textContent === 'New!', 'first clean find of an item shows the New! badge');
+    check(/^New! /.test(w.__spoken[before]), 'and says "New!" first (' + w.__spoken[before] + ')');
+    check(TT.metToday().includes(it.id) && TT.S.stats.news === 1, 'the item joins today\'s met list');
+    await sleep(60);
+    // a hinted find is not clean: streak resets, nothing new
+    tap(wrong()); await sleep(470); let wc = wrong(); wc.classList.remove('dim'); tap(wc); await sleep(5); tap(right());
+    check(TT.S.lastTier === 'normal' && !d.querySelector('#celebrate .badge') && TT.S.cleanStreak === 0, 'a hinted find celebrates normally and resets the streak');
+    await sleep(40);
+    // three clean in a row → parade with three items, then the streak restarts
+    let tiers = [], parade = null;
+    for (let i = 0; i < 3; i++) { tap(right()); tiers.push(TT.S.lastTier); if (TT.S.lastTier === 'parade') { const el = d.querySelector('#celebrate'); parade = { items: el.querySelectorAll('.parade .item').length, text: el.textContent }; } await sleep(70); }
+    check(tiers[2] === 'parade' && tiers[0] !== 'parade' && tiers[1] !== 'parade', 'the third clean find in a row is a parade (' + tiers.join(',') + ')');
+    check(parade && parade.items === 3 && /3 in a row/.test(parade.text), 'the parade marches the last three finds');
+    const paradeSaid = w.__spoken.filter(t => /, .*, .*!$/.test(t)).pop() || '';
+    check(paradeSaid.split(',').length === 3, 'parade speech names all three (' + paradeSaid + ')');
+    check(TT.S.cleanStreak === 0 && TT.S.stats.parades === 1, 'streak restarts after a parade');
+    // cheers rotate through all twelve plus the composed one, never random
+    const texts = new Set(); let composed = 0; TT.S.cheerIdx = 0;
+    for (let i = 0; i < 13; i++) { const c = TT.nextCheer(TT.ITEMS.animals[0]); if (c.composed) composed++; else texts.add(c.text); }
+    check(texts.size === 12 && composed === 1, 'thirteen cheers in a row cover all twelve plus one "You found the ___!"');
+    const c2 = TT.nextCheer(TT.ITEMS.animals[0]);
+    check(c2.text === TT.CHEERS[0], 'then the rotation starts over');
+    // all-done recap lists what was met today
+    const met = TT.metToday().slice();
+    TT.openSwitch(); d.querySelector('#switch [data-act="end"]').click();
+    const recap = d.querySelector('#done-met');
+    check(/Today you met/.test(recap.textContent) && met.every(id => recap.textContent.includes(id.split(':')[1])), 'done screen lists today\'s clean finds by name (' + met.length + ')');
+    check(recap.querySelectorAll('.met').length === met.length && met.length >= 1, 'one chip per item met');
+    const saved = JSON.parse(w.localStorage.getItem('tt.progress'));
+    check(saved.today && saved.today.met.length === met.length && /^\d{4}-\d{2}-\d{2}$/.test(saved.today.date), 'today\'s list persists with its date');
+    // a fresh boot on the same day with nothing met says so
+    const b2 = boot(); b2.TT.progress().today = { date: '2000-01-01', met: ['animals:cow'] };
+    Object.assign(b2.TT.CFG, { CALM_MS: 1, MIN_BLOCK_MS: 1e9 }); b2.TT.settings.minutes = 0.001; b2.TT.settings.domains = ['animals'];
+    b2.d.querySelector('[data-act="start"]').click(); await sleep(900);
+    check(b2.TT.S.phase === 'done' && /all about exploring/.test(b2.d.querySelector('#done-met').textContent), 'an old day\'s list is dropped: recap shows the exploring line');
   }
 
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
