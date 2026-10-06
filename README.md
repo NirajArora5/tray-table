@@ -29,3 +29,6 @@ Before boarding: Settings → Accessibility → Guided Access → on. Open Tray 
 - `LEVELS`: the ladder every category climbs.
 
 When you change `index.html`, bump `CACHE` in `sw.js` so installed copies refresh.
+
+## Tests
+`npm install`, then `npm test` (jsdom suite: engine paths, session machine, silent mode, counting, jump sheet) and `npm run sim` (five simulated toddlers play ten minutes each at 20x speed and print their ladders). Both run on every push and pull request through `.github/workflows/test.yml`. Change an engine threshold in `CFG` only with a before/after from `npm run sim`.
