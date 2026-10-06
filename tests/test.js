@@ -277,6 +277,46 @@ const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if
     check(b2.TT.S.phase === 'done' && /all about exploring/.test(b2.d.querySelector('#done-met').textContent), 'an old day\'s list is dropped: recap shows the exploring line');
   }
 
+  /* ---- Test 7: co-play (read it aloud) and minutes today ---- */
+  {
+    const { w, d, tap, TT } = boot();
+    Object.assign(TT.CFG, { BLOCK_MS: 600000, CALM_MS: 1000, MIN_BLOCK_MS: 100, PEEK_MS: 20, CELEBRATE_MS: 20, CELEBRATE_NEW_MS: 20, CELEBRATE_PARADE_MS: 20, IDLE_MS: 1e6, POKE_MS: 1e6, RESHUFFLE_MS: 1e6, REVIEW_P: 0 });
+    check(d.querySelectorAll('#panel [data-act="sound"]').length === 3 && d.querySelector('#panel [data-act="sound"][data-v="coplay"]'), 'Sound offers On, silent and co-play');
+    d.querySelector('#panel [data-act="sound"][data-v="coplay"]').click();
+    check(!TT.settings.sound && TT.settings.coplay && d.querySelector('#panel [data-act="sound"][data-v="coplay"]').classList.contains('on'), 'co-play turns the sound off and marks itself');
+    TT.settings.minutes = 30; TT.settings.domains = ['animals']; TT.dprog('animals').level = 3;
+    d.querySelector('[data-act="start"]').click(); await sleep(10);
+    const tr = TT.S.trial;
+    check(tr && tr.cue === 'ask' && d.querySelector('#cue .cue-q') && /🗣️/.test(d.querySelector('#cue').textContent), 'in co-play a Find 3 round keeps the target hidden and shows the read-aloud cue');
+    const ro = d.querySelector('#readout');
+    check(!ro.classList.contains('hidden') && ro.textContent === tr.prompt && /^Where's the /.test(ro.textContent), 'the prompt is shown as text for the grown-up (' + ro.textContent + ')');
+    check(w.__spoken.length === 0, 'nothing is spoken');
+    const right = [...d.querySelectorAll('#choices .card')].find(c => c.dataset.id === tr.target.id); tap(right);
+    const read = d.querySelector('#celebrate .read');
+    check(read && read.textContent.includes(tr.target.name.charAt(0).toUpperCase() + tr.target.name.slice(1)), 'the celebration shows its line to read (' + (read && read.textContent) + ')');
+    await sleep(40);
+    // switching back to sound on hides the strip
+    d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); d.querySelector('#switch [data-act="settings"]').click();
+    d.querySelector('#panel [data-act="sound"][data-v="on"]').click();
+    check(TT.settings.sound && !TT.settings.coplay, 'On restores sound and ends co-play');
+    d.querySelector('#panel [data-act="resume"]').click(); await sleep(10);
+    check(d.querySelector('#readout').classList.contains('hidden'), 'the read-aloud strip is hidden again');
+    // minutes today: play time accrues, pauses do not count, the panel says so
+    TT.openSwitch(); d.querySelector('#switch [data-act="end"]').click();
+    const t0 = TT.today(); const before = t0.ms;
+    check(t0.sessions === 1 && before > 0 && before < 2000, `a session's play time is on the clock (${before} ms)`);
+    d.querySelector('#done-parent').click(); d.querySelector('[data-act="start"]').click(); await sleep(120);
+    d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(150);
+    d.querySelector('#switch [data-act="resume"]').click(); await sleep(100);
+    TT.openSwitch(); d.querySelector('#switch [data-act="end"]').click();
+    const played = TT.today().ms - before;
+    check(played >= 180 && played < 330, `a second session adds its play time without the pause (${played} ms for ~220 played, 150 paused)`);
+    d.querySelector('#done-parent').click();
+    check(/Played today: 0 min in 2 sessions/.test(d.querySelector('#panel').textContent), 'the panel shows minutes and sessions today');
+    TT.progress().today = { date: '2000-01-01', met: [], ms: 999999, sessions: 9 };
+    check(TT.today().ms === 0 && TT.today().sessions === 0, 'a new day starts the clock at zero');
+  }
+
   console.log(fails ? `\n${fails} FAILED` : '\nALL PASSED');
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(2); });

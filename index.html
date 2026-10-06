@@ -46,6 +46,8 @@ body{height:100%;margin:0;background:var(--bg);color:var(--fg);
 
 /* ---- play ---- */
 #screen-play{padding:16px 14px 12px}
+#readout{flex:none;font-size:min(3.8vh,5.6vw);font-weight:700;text-align:center;line-height:1.25;padding:8px 14px;border-radius:14px;background:var(--card);color:var(--fg);margin-bottom:8px}
+#celebrate .read{font-size:min(3.6vh,5.2vw);font-weight:700;margin-top:10px;text-align:center;padding:0 16px}
 #cue{flex:0 0 34%;min-height:0;display:flex;align-items:center;justify-content:center;position:relative;container-type:size}
 .cue-item .item{font-size:min(24vh,28vw);font-size:76cqmin}
 .cue-q{width:min(22vh,24vw);height:min(22vh,24vw);border-radius:50%;background:var(--card);box-shadow:var(--shadow);
@@ -195,6 +197,7 @@ dl.stats dd{margin:0;font-weight:700}
   <section id="screen-switch" class="screen hidden"><div class="sheet" id="switch"></div></section>
 
   <section id="screen-play" class="screen hidden">
+    <div id="readout" class="hidden"></div>
     <div id="cue"></div>
     <div id="choices"></div>
   </section>
@@ -353,9 +356,10 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
-const settings = Object.assign({ minutes: 10, sound: true, domains: ['animals', 'vehicles', 'food'], voiceURI: '', rate: 0.85, voiceMode: 'recorded', ownVoice: true, kidName: '' }, store.get('tt.settings', {}));
+const settings = Object.assign({ minutes: 10, sound: true, domains: ['animals', 'vehicles', 'food'], voiceURI: '', rate: 0.85, voiceMode: 'recorded', ownVoice: true, kidName: '', coplay: false }, store.get('tt.settings', {}));
 settings.domains = (settings.domains || []).filter(d => RAW[d]);
 if (!settings.v || settings.v < 2) { if (!settings.domains.includes('counting')) settings.domains.push('counting'); settings.v = 2; }
+if (settings.coplay) settings.sound = false;   // co-play is a way of being silent
 let progress = store.get('tt.progress', null);
 if (!progress || !progress.domains) progress = { domains: {}, sessions: 0 };
 const save = () => { store.set('tt.settings', settings); store.set('tt.progress', progress); };
@@ -367,12 +371,19 @@ function dprog(d) {
 }
 // What was found cleanly today (first-tap, no hint), across sessions, for the all-done screen. Keyed on the local date.
 const todayKey = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
-function metToday() { if (!progress.today || progress.today.date !== todayKey()) progress.today = { date: todayKey(), met: [] }; return progress.today.met; }
+function today() {
+  if (!progress.today || progress.today.date !== todayKey()) progress.today = { date: todayKey(), met: [], ms: 0, sessions: 0 };
+  if (!progress.today.ms) progress.today.ms = 0; if (!progress.today.sessions) progress.today.sessions = 0;
+  return progress.today;
+}
+function metToday() { return today().met; }
+// Minutes today: play time (pauses excluded) accrues from S.markAt whenever the session pauses or ends.
+function accrue() { if (S.markAt) { today().ms += Math.max(0, now() - S.markAt); S.markAt = 0; } }
 const S = {
   running: false, paused: false, start: 0, endAt: 0, pauseAt: 0, pausedTotal: 0,
   block: 0, order: [], dom: null, blockEndsAt: 0, justBroke: false,
   phase: 'off', trial: null, explore: null, missStreak: 0, support: 0, stats: null, tapTimes: [],
-  cheerIdx: 0, cleanStreak: 0, recentClean: [], lastTier: 'normal', rec: null, recErr: '', confirmClear: false, gateOk: false, gateQ: null, gateErr: '',
+  cheerIdx: 0, cleanStreak: 0, recentClean: [], lastTier: 'normal', rec: null, recErr: '', confirmClear: false, gateOk: false, gateQ: null, gateErr: '', markAt: 0,
   idleT: null, idle2T: null, celebT: null, exploreT: null, reshuffleT: null, breakStep: null, confirmReset: false
 };
 const freshStats = () => ({ trials: 0, firstOk: 0, support: 0, hints: 0, pokes: 0, spam: 0, exploreTaps: 0, reprompts: 0, news: 0, parades: 0 });
@@ -464,7 +475,7 @@ function makeTrial(d, level) {
   const target = pickTarget(d, set, S.trial ? S.trial.target.id : null);
   const k = support ? 1 : Math.min(L.choices, set.length);
   const others = shuffle(set.filter(it => it.id !== target.id)).slice(0, k - 1);
-  let cue = L.cue; if (cue === 'ask' && !settings.sound) cue = 'peek'; if (support) cue = 'shown';
+  let cue = L.cue; if (cue === 'ask' && !settings.sound && !settings.coplay) cue = 'peek'; if (support) cue = 'shown';
   return { mode: 'find', level: L.id, support, review, target, choices: shuffle([target, ...others]), cue,
            wrongs: 0, hint: false, firstTap: true, readyAt: 0, startedAt: now(), done: false, prompt: '' };
 }
@@ -633,8 +644,14 @@ const AUDIO = {
   },
   stop() { (this.playing || []).forEach(src => { try { src.stop(); } catch (e) {} }); this.playing = null; this.seq++; }
 };
+// Co-play: sound off, and every line the game would say is shown as text for the grown-up to read aloud.
+function readout(text) {
+  const el = $('#readout'); if (!el) return;
+  el.classList.toggle('hidden', !settings.coplay); if (settings.coplay) el.textContent = text;
+}
 const VOICE = {
   say(text, mode, ids, force) {
+    if (!force) readout(text);   // shows the line in co-play, hides the strip otherwise
     if (!settings.sound && !force) return;
     if (settings.voiceMode !== 'device' && AUDIO.has(ids) && AUDIO.ctx()) {
       TTS.stop();
@@ -763,8 +780,8 @@ function startSession() {
   Object.assign(S, { running: true, paused: false, start: now(), pausedTotal: 0, block: 0, order: shuffle(settings.domains),
     stats: freshStats(), missStreak: 0, support: 0, justBroke: false, tapTimes: [], trial: null, explore: null, breakStep: null,
     cleanStreak: 0, recentClean: [], lastTier: 'normal' });
-  S.endAt = S.start + settings.minutes * 60000;
-  progress.sessions = (progress.sessions || 0) + 1; save();
+  S.endAt = S.start + settings.minutes * 60000; S.markAt = S.start;
+  progress.sessions = (progress.sessions || 0) + 1; today().sessions++; save();
   SFX.init(); SFX.resume(); UNMUTE.start(); VOICE.say("Let's play!", 'replace', ['lets-play']);
   AUDIO.warm(['here', 'tap-tap', 'what-do-you-see', 'touch-one', 'lets-count-to', 'new', 'you-found-the', ...CHEERS.map((c, i) => 'cheer:' + i), ...NUMWORDS.slice(1).map(w => 'name:counting:' + w)]);
   timebarStart();
@@ -819,7 +836,7 @@ function startCalm(opts) {
   T.after(Math.max(800, ms), (opts && opts.ms && ms < left - 500) ? nextBlock : finishSession);
 }
 function finishSession() {
-  T.clearAll(); clearIdle(); hideCelebrate();
+  T.clearAll(); clearIdle(); hideCelebrate(); accrue();
   S.running = false; S.paused = false; S.phase = 'done'; stopTimebar();
   $('#bubbles').innerHTML = ''; renderMet(); show('done'); setBg('done');
   SFX.play('yay'); VOICE.say('All done! Great job!', 'replace', ['all-done']); save();
@@ -832,20 +849,20 @@ function renderMet() {
     : `<p class="met-title">Today was all about exploring.</p>`;
 }
 function endSession() {
-  S.running = false; S.paused = false; S.phase = 'done';
+  accrue(); S.running = false; S.paused = false; S.phase = 'done';
   T.clearAll(); clearIdle(); hideCelebrate(); VOICE.stop(); stopTimebar();
   $('#bubbles').innerHTML = ''; setBg(null); save();
 }
 function pause() {
   if (!S.running || S.paused) return;
-  S.paused = true; S.pauseAt = now(); T.clearAll(); clearIdle(); hideCelebrate(); VOICE.stop();
+  S.paused = true; S.pauseAt = now(); accrue(); T.clearAll(); clearIdle(); hideCelebrate(); VOICE.stop();
 }
 function unpause() {
   if (!S.paused) return;
   const dt = now() - S.pauseAt; S.pausedTotal += dt;
   S.endAt = S.start + settings.minutes * 60000 + S.pausedTotal;
   S.blockEndsAt = Math.min(S.blockEndsAt + dt, S.endAt - CFG.CALM_MS);
-  S.paused = false;
+  S.paused = false; S.markAt = now();
 }
 function openPanel() { pause(); renderPanel(); show('parent'); setBg(null); }
 function openSwitch() {
@@ -915,7 +932,7 @@ function relayout() {
 function cueHTML(tr, mode) {
   if (mode === 'show') return `<div class="cue-item bounce">${renderItem(tr.target)}</div>`;
   if (mode === 'peek') return `<div class="cue-item peek">${renderItem(tr.target)}</div>`;
-  return `<div class="cue-q pulse">${settings.sound && tr.cue === 'ask' ? '🔊' : '👀'}</div>`;
+  return `<div class="cue-q pulse">${tr.cue === 'ask' ? (settings.sound ? '🔊' : '🗣️') : '👀'}</div>`;
 }
 function renderTrial(tr) {
   if (tr.mode === 'count') return renderCountTrial(tr);
@@ -1037,7 +1054,7 @@ function celebrateParade(then) {
 function celebrateHTML(html, label, speech, clips, then, o) {
   o = o || {};
   const el = $('#celebrate');
-  el.innerHTML = `${o.badge ? `<div class="badge">${o.badge}</div>` : ''}<div class="big">${html}</div><div class="label">${label}</div>`;
+  el.innerHTML = `${o.badge ? `<div class="badge">${o.badge}</div>` : ''}<div class="big">${html}</div><div class="label">${label}</div>${settings.coplay ? `<div class="read">${esc(speech)}</div>` : ''}`;
   confetti(el); el.classList.remove('hidden');
   SFX.play('yay'); VOICE.say(speech, 'replace', clips);
   S.celebT = T.after(o.ms || CFG.CELEBRATE_MS, () => { hideCelebrate(); then(); });
@@ -1177,14 +1194,17 @@ function renderPanel() {
       <dt>New finds</dt><dd>${st.news}</dd>
       <dt>Parades</dt><dd>${st.parades}</dd></dl></div>`;
   }
+  { const t = today(), live = S.running && !S.paused && S.markAt ? now() - S.markAt : 0, mins = Math.round((t.ms + live) / 60000);
+    h += `<p class="note" style="margin:0">Played today: ${mins} min${t.sessions ? ` in ${t.sessions} session${t.sessions === 1 ? '' : 's'}` : ''}${t.met.length ? `, met ${t.met.length}` : ''}.</p>`; }
   h += `<p class="note" id="offline-note" style="margin:0"></p>`;
   h += `<div class="row">` + (running
     ? `<button class="btn primary" data-act="resume">Resume</button><button class="btn" data-act="end">End session</button>`
     : `<button class="btn primary" data-act="start">${done ? 'Start again' : 'Start'}</button>`) + `</div>`;
   h += `<div><h2>How long</h2><div class="seg">${[5, 10, 15, 20, 30].map(m => `<button data-act="min" data-v="${m}" class="${settings.minutes === m ? 'on' : ''}">${m} min</button>`).join('')}</div>
     <p class="note">Ends with a minute of slow bubbles, then a clear all-done.</p></div>`;
-  h += `<div><h2>Sound</h2><div class="seg"><button data-act="sound" data-v="1" class="${settings.sound ? 'on' : ''}">On</button><button data-act="sound" data-v="0" class="${!settings.sound ? 'on' : ''}">Off, silent mode</button></div>
-    <p class="note">Silent mode swaps spoken prompts for a quick peek at the target, so it works muted at the table.</p></div>`;
+  const mode = settings.sound ? 'on' : settings.coplay ? 'coplay' : 'silent';
+  h += `<div><h2>Sound</h2><div class="seg"><button data-act="sound" data-v="on" class="${mode === 'on' ? 'on' : ''}">On</button><button data-act="sound" data-v="silent" class="${mode === 'silent' ? 'on' : ''}">Off, silent mode</button><button data-act="sound" data-v="coplay" class="${mode === 'coplay' ? 'on' : ''}">Co-play, I read it</button></div>
+    <p class="note">Silent mode swaps spoken prompts for a quick peek at the target, so it works muted at the table. Co-play is also silent, but shows each line as text at the top for you to read aloud; the target stays hidden and your child taps.</p></div>`;
   const voices = TTS.ok ? TTS.list() : [];
   h += `<div><h2>Voice</h2><div class="seg" style="margin-bottom:10px"><button data-act="vmode" data-v="recorded" class="${settings.voiceMode !== 'device' ? 'on' : ''}">Recorded voice</button><button data-act="vmode" data-v="device" class="${settings.voiceMode === 'device' ? 'on' : ''}">Device voice</button></div>
     <p class="note" style="margin:0 0 10px">Recorded is a bundled, offline voice pack (${Object.keys(CLIPS).length} clips), the same on every device. Device voice uses what the iPad has installed; pick one below.</p>` + (voices.length
@@ -1257,7 +1277,7 @@ $('#panel').addEventListener('click', e => {
   if (act === 'resume') return resumeSession();
   if (act === 'end') { endSession(); return renderPanel(); }
   if (act === 'min') settings.minutes = +v;
-  if (act === 'sound') settings.sound = v === '1';
+  if (act === 'sound') { settings.sound = v === 'on'; settings.coplay = v === 'coplay'; readout(''); }
   if (act === 'rate') settings.rate = +v;
   if (act === 'vmode') settings.voiceMode = v;
   if (act === 'photos' || act === 'gate-answer' || act === 'pname' || act === 'kidname') return;   // inputs: handled on change
@@ -1373,7 +1393,7 @@ if (location.protocol === 'https:' && !NATIVE && !/claude|anthropic/i.test(locat
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   } catch (e) {}
 }
-window.TT = { S, CFG, settings, LEVELS, DOMAINS, ITEMS, TTS, CHEERS, metToday, nextCheer, OWN, AUDIO, REC, ownPhrases, renderPanel, PHOTOS, DOMS, available, family: () => family, addPhotos, namePhoto, removePhoto, WIGGLES, COUNT_OBJECTS, NUMWORDS, ladder, dprog, levelCap, progress: () => progress, startSession, nextBlock, runTrial, jumpTo, stepCategory, openSwitch };
+window.TT = { S, CFG, settings, LEVELS, DOMAINS, ITEMS, TTS, CHEERS, metToday, today, nextCheer, OWN, AUDIO, REC, ownPhrases, renderPanel, PHOTOS, DOMS, available, family: () => family, addPhotos, namePhoto, removePhoto, WIGGLES, COUNT_OBJECTS, NUMWORDS, ladder, dprog, levelCap, progress: () => progress, startSession, nextBlock, runTrial, jumpTo, stepCategory, openSwitch };
 })();
 </script>
 </body>
