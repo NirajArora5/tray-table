@@ -107,7 +107,7 @@ function boot(opts) {
     // delete one, persistence across a reload, delete all
     click('#booth [data-act="recdel"][data-v="kid-name"]'); await sleep(30);
     check(!TT.OWN.has('kid-name') && TT.OWN.has('cheer:0'), 'deleting one recording leaves the others');
-    const again = boot(); await again.TT.OWN.load();
+    const again = boot(); await again.TT.OWN.load(); await sleep(30);
     check(again.TT.OWN.has('cheer:0') && /1 of 41 recorded/.test(again.d.querySelector('#booth-count').textContent), 'recordings survive a reload (IndexedDB)');
     again.click('#booth [data-act="recclear"]'); await sleep(5); again.click('#booth [data-act="recclear"]'); await sleep(40);
     check(again.TT.OWN.count() === 0 && !again.d.querySelector('#booth [data-act="recclear"]'), 'Delete all needs a second tap, then empties the store');

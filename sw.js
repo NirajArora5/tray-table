@@ -1,5 +1,5 @@
 // Tray Table v0 — offline cache. Bump CACHE when index.html changes.
-const CACHE = 'tray-table-v0-8';
+const CACHE = 'tray-table-v0-9';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

@@ -5,7 +5,7 @@ const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'https://localhost
 const cap1 = s => s.charAt(0).toUpperCase() + s.slice(1);
 const LETTER = { A: 'ay', B: 'bee', C: 'see', D: 'dee', E: 'ee', O: 'oh', S: 'ess', M: 'em' };
 const P = {};
-for (const d of Object.keys(TT.ITEMS)) for (const it of TT.ITEMS[d]) {
+for (const d of Object.keys(TT.ITEMS)) for (const it of TT.ITEMS[d]) { if (TT.DOMAINS[d].kind === 'photo') continue;   // family photos are the parent's, recorded in the booth
   const kind = TT.DOMAINS[d].kind;
   const spoken = kind === 'letter' ? LETTER[it.name] : it.name;                       // how the name is pronounced
   const label = kind === 'letter' ? 'letter ' + LETTER[it.name] : kind === 'swatch' ? it.name + ' one' : kind === 'number' ? 'number ' + it.name : it.name;
