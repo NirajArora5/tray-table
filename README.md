@@ -32,3 +32,11 @@ When you change `index.html`, bump `CACHE` in `sw.js` so installed copies refres
 
 ## Tests
 `npm install`, then `npm test` (jsdom suite: engine paths, session machine, silent mode, counting, jump sheet) and `npm run sim` (five simulated toddlers play ten minutes each at 20x speed and print their ladders). Both run on every push and pull request through `.github/workflows/test.yml`. Change an engine threshold in `CFG` only with a before/after from `npm run sim`.
+
+## Native shells (iOS and Android)
+`ios/` and `android/` are Capacitor shells around the very same `index.html`: app id `com.narora.toddlertime`, name Toddler Time, any orientation, no permissions, no network. They are checked in; `npm run cap:sync` stages the page into `www/` (gitignored) and copies it into both projects. Then `npm run ios` opens Xcode, `npm run android` opens Android Studio.
+
+- The iOS shell sets the audio session to playback in `AppDelegate.swift`, so the voice is audible with the ring/silent switch on. The page's silent loop stays as a fallback.
+- Inside a shell the page skips the service worker and the grown-up panel says "Installed app".
+- Icons and splash screens come from `icon-512.png`: `npm run assets` rebuilds the 1024px sources in `assets/` and fans them out to both projects. Replace `icon-512.png` with a sharper master when there is one.
+- `tests/native.js` (part of `npm test`) checks the shells' config: bundle id, no permissions, orientations, audio session, and that the page behaves inside a shell.

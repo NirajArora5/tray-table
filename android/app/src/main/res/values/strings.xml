@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Toddler Time</string>
+    <string name="title_activity_main">Toddler Time</string>
+    <string name="package_name">com.narora.toddlertime</string>
+    <string name="custom_url_scheme">com.narora.toddlertime</string>
+</resources>

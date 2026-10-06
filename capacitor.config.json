@@ -1,0 +1,12 @@
+{
+  "appId": "com.narora.toddlertime",
+  "appName": "Toddler Time",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "server": { "androidScheme": "https" },
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "never", "limitsNavigationsToAppBoundDomains": true },
+  "plugins": {
+    "SplashScreen": { "launchAutoHide": true, "launchShowDuration": 0, "backgroundColor": "#f6f8ff", "showSpinner": false, "splashFullScreen": true, "splashImmersive": true }
+  }
+}
