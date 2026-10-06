@@ -4,7 +4,7 @@
   "private": true,
   "description": "Offline toddler game for planes, restaurants and big feelings. The game is index.html; everything else is tooling and the native shells.",
   "scripts": {
-    "test": "node tests/test.js && node tests/native.js && node tests/ci.js",
+    "test": "node tests/test.js && node tests/voice.js && node tests/native.js && node tests/ci.js",
     "sim": "node tests/sim.js",
     "serve": "python3 -m http.server 8765",
     "www": "node scripts/www.js",
@@ -18,7 +18,9 @@
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.5.2",
     "@capacitor/core": "^8.5.2",
+    "@capacitor/filesystem": "^8.1.4",
     "@capacitor/ios": "^8.5.2",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^26.0.0"
   }
 }

@@ -29,5 +29,7 @@
         </provider>
     </application>
 
-    <!-- No permissions. The game is fully offline: no INTERNET, nothing leaves the device. -->
+    <!-- Microphone only, for the "Your voice" booth in the grown-up panel. No INTERNET: the game is fully offline and nothing leaves the device. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 </manifest>
